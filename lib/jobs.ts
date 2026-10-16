@@ -1,4 +1,5 @@
 export const STATUSES = [
+  "New",
   "Kept",
   "Applied",
   "Auto-Interview",
@@ -19,6 +20,7 @@ export type Status = (typeof STATUSES)[number];
 export type Tone = "info" | "ok" | "stage" | "bad" | "warn" | "mute";
 
 export const TONE: Record<Status, Tone> = {
+  New: "warn",
   Kept: "info",
   Applied: "ok",
   "Auto-Interview": "stage",
@@ -30,7 +32,7 @@ export const TONE: Record<Status, Tone> = {
   Rejected: "bad",
   Ghosted: "mute",
   Withdrawn: "mute",
-  "Closed": "warn",
+  Closed: "mute",
   Skipped: "mute",
 };
 
@@ -58,14 +60,20 @@ export type Job = {
   applied_on: string | null;
   my_notes: string | null;
   setup: "remote" | "relocation" | null;
+  source: "search" | "collector" | "manual" | "import";
+  company_id: number | null;
+  published_at: string | null;
+  location_raw: string | null;
+  description: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type ViewKey = "active" | "toapply" | "applied" | "progress" | "archive" | "all";
+export type ViewKey = "new" | "active" | "toapply" | "applied" | "progress" | "archive" | "all";
 
 export const VIEWS: { key: ViewKey; label: string; test: (j: Job) => boolean }[] = [
-  { key: "active", label: "Active", test: (j) => !CLOSED.has(j.status) },
+  { key: "active", label: "Active", test: (j) => !CLOSED.has(j.status) && j.status !== "New" },
+  { key: "new", label: "Unreviewed", test: (j) => j.status === "New" },
   { key: "toapply", label: "To apply", test: (j) => j.status === "Kept" },
   { key: "applied", label: "Applied", test: (j) => j.status === "Applied" },
   { key: "progress", label: "Interviews", test: (j) => PROGRESS.has(j.status) },
@@ -202,4 +210,51 @@ export function jobsToCSV(jobs: Job[]): string {
     [j.found_on, j.status, j.company, j.title, j.link, j.posted_on, j.score, j.why, j.location_notes, j.hiring_note, j.applied_on, j.my_notes].map(cell).join(","),
   );
   return "\uFEFF" + [H.join(","), ...lines].join("\n");
+}
+
+export type CompanyRow = {
+  id: number;
+  name: string;
+  ats: "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable";
+  slug: string;
+  active: boolean;
+  notes: string | null;
+  last_checked_at: string | null;
+  last_status: string | null;
+  last_open_jobs: number | null;
+};
+
+export type CollectRun = {
+  id: number;
+  started_at: string;
+  trigger: string;
+  companies_checked: number;
+  postings_seen: number;
+  matched: number;
+  inserted: number;
+  errors: { company: string; error: string }[];
+};
+
+export const ATS_HINT: Record<CompanyRow["ats"], string> = {
+  greenhouse: "job-boards.greenhouse.io/<slug>",
+  lever: "jobs.lever.co/<slug>",
+  lever_eu: "jobs.eu.lever.co/<slug>",
+  ashby: "jobs.ashbyhq.com/<slug>",
+  smartrecruiters: "jobs.smartrecruiters.com/<slug>",
+  workable: "apply.workable.com/<slug>",
+};
+
+/** Paste a careers link, get the ATS and slug back. */
+export function parseBoardUrl(url: string): { ats: CompanyRow["ats"]; slug: string } | null {
+  const u = url.trim().replace(/^https?:\/\//i, "");
+  const rules: [RegExp, CompanyRow["ats"]][] = [
+    [/^(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io\/(?:embed\/job_board\?for=)?([^/?#]+)/i, "greenhouse"],
+    [/^jobs\.eu\.lever\.co\/([^/?#]+)/i, "lever_eu"],
+    [/^jobs\.lever\.co\/([^/?#]+)/i, "lever"],
+    [/^jobs\.ashbyhq\.com\/([^/?#]+)/i, "ashby"],
+    [/^(?:jobs|careers)\.smartrecruiters\.com\/([^/?#]+)/i, "smartrecruiters"],
+    [/^apply\.workable\.com\/([^/?#]+)/i, "workable"],
+  ];
+  for (const [re, ats] of rules) { const m = u.match(re); if (m) return { ats, slug: decodeURIComponent(m[1]) }; }
+  return null;
 }

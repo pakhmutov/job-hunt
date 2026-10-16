@@ -1,6 +1,8 @@
 # Job Hunt
 
-Personal tracker for frontend job applications. A scheduled Claude task finds new postings every morning and writes them straight into the database; this app is where I review them, track statuses and keep notes.
+Personal tracker for frontend job applications.
+
+**How jobs arrive:** a Vercel Cron job calls `/api/collect` every morning. It polls the public job-board APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable) of the companies on the *Companies* tab, keeps fresh frontend/React roles in plausible locations and stores them as `New`. A scheduled Claude task then reads each description, scores it against my CV, and moves it to `Kept` (with draft answers) or `Skipped`.
 
 **Stack:** Next.js 15 (App Router) · TypeScript · Supabase (Postgres, Auth, Realtime) · CSS Modules · Vercel
 
@@ -26,5 +28,6 @@ npm run dev
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable (anon) key |
 | `NEXT_PUBLIC_OWNER_EMAIL` | The only email allowed in |
+| `CRON_SECRET` | Shared secret for `/api/collect`; its SHA-256 lives in `private.settings` |
 
-Database schema: `supabase/migrations/0001_init.sql`.
+Database schema: `supabase/migrations/`.

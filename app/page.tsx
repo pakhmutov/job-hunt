@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import Dashboard from "@/components/Dashboard";
-import type { Job } from "@/lib/jobs";
+import type { CollectRun, CompanyRow, Job } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,17 @@ export default async function Home() {
     );
   }
 
-  const { data, error } = await supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000);
-  return <Dashboard initialJobs={(data ?? []) as Job[]} loadError={error?.message ?? null} />;
+  const [{ data, error }, { data: companies }, { data: runs }] = await Promise.all([
+    supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000),
+    supabase.from("companies").select("*").order("name"),
+    supabase.from("collect_runs").select("*").order("started_at", { ascending: false }).limit(1),
+  ]);
+  return (
+    <Dashboard
+      initialJobs={(data ?? []) as Job[]}
+      loadError={error?.message ?? null}
+      companies={(companies ?? []) as CompanyRow[]}
+      lastRun={(runs?.[0] as CollectRun | undefined) ?? null}
+    />
+  );
 }

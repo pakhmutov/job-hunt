@@ -5,13 +5,15 @@ import { createClient } from "@/lib/supabase/client";
 import {
   CLOSED, PROGRESS, SENT, STATUSES, TONE, VIEWS, WAITING,
   csvToJobs, daysSince, jobId, jobsToCSV, todayISO,
-  type Job, type Status, type ViewKey,
+  type CollectRun, type CompanyRow, type Job, type Status, type ViewKey,
 } from "@/lib/jobs";
+import Companies from "./Companies";
 import s from "./Dashboard.module.css";
 
-type Props = { initialJobs: Job[]; loadError: string | null };
+type Props = { initialJobs: Job[]; loadError: string | null; companies: CompanyRow[]; lastRun: CollectRun | null };
 
-export default function Dashboard({ initialJobs, loadError }: Props) {
+export default function Dashboard({ initialJobs, loadError, companies, lastRun }: Props) {
+  const [page, setPage] = useState<"jobs" | "companies">("jobs");
   const supabase = useMemo(() => createClient(), []);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [view, setView] = useState<ViewKey>("active");
@@ -70,6 +72,11 @@ export default function Dashboard({ initialJobs, loadError }: Props) {
     setJobs((prev) => prev.map((j) => (j.id === id ? (data as Job) : j)));
   }
 
+  async function reload() {
+    const { data } = await supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000);
+    if (data) setJobs(data as Job[]);
+  }
+
   async function remove(id: string) {
     const { error } = await supabase.from("jobs").delete().eq("id", id);
     if (error) { setToast("Couldn't delete the job."); return; }
@@ -104,6 +111,7 @@ export default function Dashboard({ initialJobs, loadError }: Props) {
     const sent = by(SENT);
     const replied = by(PROGRESS) + jobs.filter((j) => j.status === "Rejected").length;
     return {
+      fresh: jobs.filter((j) => j.status === "New").length,
       toApply: jobs.filter((j) => j.status === "Kept").length,
       waiting: by(WAITING),
       progress: by(PROGRESS),
@@ -130,6 +138,10 @@ export default function Dashboard({ initialJobs, loadError }: Props) {
       <header className={s.header}>
         <div>
           <h1>Job Hunt</h1>
+          <nav className={s.nav} aria-label="Sections">
+            <button type="button" aria-pressed={page === "jobs"} onClick={() => setPage("jobs")}>Jobs</button>
+            <button type="button" aria-pressed={page === "companies"} onClick={() => setPage("companies")}>Companies</button>
+          </nav>
           <div className={s.sub}>
             {jobs.length} jobs tracked · {counts.sent} applications sent
             {counts.replyRate !== null && <> · {counts.replyRate}% got a reply</>}
@@ -149,8 +161,13 @@ export default function Dashboard({ initialJobs, loadError }: Props) {
 
       {loadError && <p className={s.error}>Couldn&apos;t load your jobs: {loadError}</p>}
 
+      {page === "companies" ? (
+        <Companies initial={companies} lastRun={lastRun} onToast={setToast} onCollected={reload} />
+      ) : (<>
+
       <section className={s.stats} aria-label="Summary">
         <Stat n={counts.toApply} label="To apply" onClick={() => pickView("toapply")} />
+        <Stat n={counts.fresh} label="Unreviewed" onClick={() => pickView("new")} />
         <Stat n={counts.waiting} label="Waiting for reply" onClick={() => pickView("applied")} />
         <Stat n={counts.progress} label="Interviews & offers" onClick={() => pickView("progress")} />
         <Stat n={counts.stale} label="No reply 14+ days" alert={counts.stale > 0} onClick={() => pickView("applied")} />
@@ -184,6 +201,8 @@ export default function Dashboard({ initialJobs, loadError }: Props) {
           ))}
         </div>
       )}
+
+      </>)}
 
       {adding && (
         <AddDialog
@@ -290,7 +309,14 @@ function Detail({ job, onPatch, onDelete, onToast }: Omit<Props2, "open" | "onTo
         <h4>Link</h4><p><a href={job.link} target="_blank" rel="noopener noreferrer">{job.link}</a></p>
         <h4>Why</h4><p>{job.why || "—"}</p>
         <h4>Location</h4><p>{job.location_notes || "—"}{job.setup ? ` (${job.setup})` : ""}</p>
-        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}</p>
+        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}{job.source === "collector" ? " · from company board" : ""}</p>
+        {job.location_raw && <><h4>Board location</h4><p>{job.location_raw}</p></>}
+        {job.description && (
+          <details className={s.desc}>
+            <summary>Job description</summary>
+            <div className={s.a}>{job.description}</div>
+          </details>
+        )}
       </div>
       <div className={s.detCol}>
         <h4>Drafts</h4>

@@ -14,12 +14,12 @@
 .error { color: var(--bad); margin: 0; }
 .muted { color: var(--muted); font-size: 12px; }
 
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .stat { display: grid; gap: 2px; text-align: left; padding: 12px 14px; border-radius: 10px; }
 .statN { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .statL { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
 .alert .statN { color: var(--bad); }
-@media (max-width: 640px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 
 .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; background: var(--sunk); padding: 4px; border-radius: 10px; }
@@ -101,4 +101,27 @@
   .k { display: inline; color: var(--muted); font-size: 12px; }
   .locCell { grid-column: 1 / -1; }
   .detail { grid-template-columns: minmax(0, 1fr); }
+}
+
+.nav { display: flex; gap: 4px; margin-top: 8px; }
+.nav button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; color: var(--muted); }
+.nav button[aria-pressed="true"] { background: var(--sunk); color: var(--fg); }
+.desc { margin-top: 10px; }
+.desc summary { cursor: pointer; font-size: 12px; color: var(--accent); }
+.desc .a { margin-top: 6px; max-height: 360px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.warnText { color: var(--warn); font-size: 12px; }
+.companies { display: grid; gap: 14px; }
+.runBox { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.runBox > div { display: grid; gap: 4px; min-width: 0; flex: 1 1 320px; }
+.addCompany { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 150px minmax(0, 1fr) auto; gap: 10px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.addCompany label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.addCompany input, .addCompany select { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 10px; color: var(--fg); min-width: 0; }
+.companyRow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.companyRow:last-child { border-bottom: 0; }
+.companyRow .rowAct { margin-top: 0; }
+@media (max-width: 900px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .addCompany { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .addCompany .wide { grid-column: 1 / -1; }
+  .companyRow { grid-template-columns: minmax(0, 1fr); }
 }
