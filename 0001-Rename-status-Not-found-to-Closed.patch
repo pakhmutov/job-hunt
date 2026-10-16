@@ -1,0 +1,63 @@
+From 008b7a020d0fe729ac96ffd1e3d464e6e7539857 Mon Sep 17 00:00:00 2001
+From: Vladimir Pakhmutov <vladimir.pakhmutoff@gmail.com>
+Date: Fri, 16 Oct 2026 21:34:06 +0000
+Subject: [PATCH] Rename status 'Not found' to 'Closed'
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LnfCHad7jCYdh2P3vLNGbt
+---
+ lib/jobs.ts                                   | 9 +++++----
+ supabase/migrations/0002_rename_not_found.sql | 2 ++
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+ create mode 100644 supabase/migrations/0002_rename_not_found.sql
+
+diff --git a/lib/jobs.ts b/lib/jobs.ts
+index 0af5f1e..3c02b58 100644
+--- a/lib/jobs.ts
++++ b/lib/jobs.ts
+@@ -10,7 +10,7 @@ export const STATUSES = [
+   "Rejected",
+   "Ghosted",
+   "Withdrawn",
+-  "Not found",
++  "Closed",
+   "Skipped",
+ ] as const;
+ 
+@@ -30,13 +30,13 @@ export const TONE: Record<Status, Tone> = {
+   Rejected: "bad",
+   Ghosted: "mute",
+   Withdrawn: "mute",
+-  "Not found": "warn",
++  "Closed": "warn",
+   Skipped: "mute",
+ };
+ 
+ export const WAITING = new Set<Status>(["Applied", "Auto-Interview"]);
+ export const PROGRESS = new Set<Status>(["Auto-Interview", "HR Screen", "Tech Interview", "Test Task", "Final", "Offer"]);
+-export const CLOSED = new Set<Status>(["Rejected", "Ghosted", "Withdrawn", "Not found", "Skipped"]);
++export const CLOSED = new Set<Status>(["Rejected", "Ghosted", "Withdrawn", "Closed", "Skipped"]);
+ /** Everything that counts as "I sent an application". */
+ export const SENT = new Set<Status>(["Applied", ...PROGRESS, "Rejected", "Ghosted"]);
+ 
+@@ -169,7 +169,8 @@ export function csvToJobs(text: string): Partial<Job>[] {
+     const g = (k: keyof typeof ix) => (ix[k] >= 0 ? (r[ix[k]] ?? "").trim() : "");
+     const link = g("link");
+     if (!link) return [];
+-    const status = (known.has(g("status")) ? g("status") : "Kept") as Status;
++    const raw = g("status") === "Not found" ? "Closed" : g("status");
++    const status = (known.has(raw) ? raw : "Kept") as Status;
+     const score = Number.parseInt(g("score"), 10);
+     const legacy = ix.note >= 0 && ix.mine < 0 ? parseLegacyNote(g("note")) : { hiring_note: g("note") || null, answers: [] };
+     return [{
+diff --git a/supabase/migrations/0002_rename_not_found.sql b/supabase/migrations/0002_rename_not_found.sql
+new file mode 100644
+index 0000000..175c81a
+--- /dev/null
++++ b/supabase/migrations/0002_rename_not_found.sql
+@@ -0,0 +1,2 @@
++-- "Not found" read like an error; the status means the posting was taken down.
++alter type public.job_status rename value 'Not found' to 'Closed';
+-- 
+2.43.0
+

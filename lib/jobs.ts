@@ -10,7 +10,7 @@ export const STATUSES = [
   "Rejected",
   "Ghosted",
   "Withdrawn",
-  "Not found",
+  "Closed",
   "Skipped",
 ] as const;
 
@@ -30,13 +30,13 @@ export const TONE: Record<Status, Tone> = {
   Rejected: "bad",
   Ghosted: "mute",
   Withdrawn: "mute",
-  "Not found": "warn",
+  "Closed": "warn",
   Skipped: "mute",
 };
 
 export const WAITING = new Set<Status>(["Applied", "Auto-Interview"]);
 export const PROGRESS = new Set<Status>(["Auto-Interview", "HR Screen", "Tech Interview", "Test Task", "Final", "Offer"]);
-export const CLOSED = new Set<Status>(["Rejected", "Ghosted", "Withdrawn", "Not found", "Skipped"]);
+export const CLOSED = new Set<Status>(["Rejected", "Ghosted", "Withdrawn", "Closed", "Skipped"]);
 /** Everything that counts as "I sent an application". */
 export const SENT = new Set<Status>(["Applied", ...PROGRESS, "Rejected", "Ghosted"]);
 
@@ -169,7 +169,8 @@ export function csvToJobs(text: string): Partial<Job>[] {
     const g = (k: keyof typeof ix) => (ix[k] >= 0 ? (r[ix[k]] ?? "").trim() : "");
     const link = g("link");
     if (!link) return [];
-    const status = (known.has(g("status")) ? g("status") : "Kept") as Status;
+    const raw = g("status") === "Not found" ? "Closed" : g("status");
+    const status = (known.has(raw) ? raw : "Kept") as Status;
     const score = Number.parseInt(g("score"), 10);
     const legacy = ix.note >= 0 && ix.mine < 0 ? parseLegacyNote(g("note")) : { hiring_note: g("note") || null, answers: [] };
     return [{
