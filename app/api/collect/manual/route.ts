@@ -12,9 +12,9 @@ export async function POST(request: Request) {
   if (!user || user.email !== process.env.NEXT_PUBLIC_OWNER_EMAIL) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const { days } = await request.json().catch(() => ({ days: 3 }));
+  const { days } = await request.json().catch(() => ({ days: 14 }));
   try {
-    const result = await runCollector("manual", Math.min(30, Math.max(1, Number(days) || 3)));
+    const result = await runCollector("manual", Math.min(30, Math.max(1, Number(days) || 14)));
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });

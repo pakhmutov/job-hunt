@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   }
   try {
     const firstRun = new URL(request.url).searchParams.get("days");
-    const result = await runCollector("cron", firstRun ? Math.min(30, Number(firstRun) || 3) : 3);
+    const result = await runCollector("cron", firstRun ? Math.min(30, Number(firstRun) || 14) : 14);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });

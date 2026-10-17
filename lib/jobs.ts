@@ -65,14 +65,17 @@ export type Job = {
   published_at: string | null;
   location_raw: string | null;
   description: string | null;
+  /** null until the job is opened in the UI */
+  seen_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type ViewKey = "new" | "active" | "toapply" | "applied" | "progress" | "archive" | "all";
+export type ViewKey = "unseen" | "new" | "active" | "toapply" | "applied" | "progress" | "archive" | "all";
 
 export const VIEWS: { key: ViewKey; label: string; test: (j: Job) => boolean }[] = [
   { key: "active", label: "Active", test: (j) => !CLOSED.has(j.status) && j.status !== "New" },
+  { key: "unseen", label: "New", test: (j) => !j.seen_at },
   { key: "new", label: "Unreviewed", test: (j) => j.status === "New" },
   { key: "toapply", label: "To apply", test: (j) => j.status === "Kept" },
   { key: "applied", label: "Applied", test: (j) => j.status === "Applied" },
@@ -215,7 +218,7 @@ export function jobsToCSV(jobs: Job[]): string {
 export type CompanyRow = {
   id: number;
   name: string;
-  ats: "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable";
+  ats: "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday";
   slug: string;
   active: boolean;
   notes: string | null;
@@ -230,6 +233,10 @@ export type CollectRun = {
   trigger: string;
   companies_checked: number;
   postings_seen: number;
+  title_matched: number;
+  dropped_level: number;
+  dropped_age: number;
+  dropped_location: number;
   matched: number;
   inserted: number;
   errors: { company: string; error: string }[];
@@ -242,6 +249,7 @@ export const ATS_HINT: Record<CompanyRow["ats"], string> = {
   ashby: "jobs.ashbyhq.com/<slug>",
   smartrecruiters: "jobs.smartrecruiters.com/<slug>",
   workable: "apply.workable.com/<slug>",
+  workday: "<tenant>.wd1/<site>",
 };
 
 /** Paste a careers link, get the ATS and slug back. */
@@ -256,5 +264,7 @@ export function parseBoardUrl(url: string): { ats: CompanyRow["ats"]; slug: stri
     [/^apply\.workable\.com\/([^/?#]+)/i, "workable"],
   ];
   for (const [re, ats] of rules) { const m = u.match(re); if (m) return { ats, slug: decodeURIComponent(m[1]) }; }
+  const wd = u.match(/^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/i);
+  if (wd) return { ats: "workday", slug: `${wd[1]}.${wd[2]}/${wd[3]}` };
   return null;
 }

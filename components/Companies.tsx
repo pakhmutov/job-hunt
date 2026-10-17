@@ -65,7 +65,7 @@ export default function Companies({ initial, lastRun, onToast, onCollected }: Pr
   async function checkNow() {
     setBusy(true);
     try {
-      const res = await fetch("/api/collect/manual", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ days: 7 }) });
+      const res = await fetch("/api/collect/manual", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ days: 14 }) });
       const out = await res.json();
       if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
       onToast(`Checked ${out.companies} companies · ${out.inserted} new jobs`);
@@ -96,6 +96,11 @@ export default function Companies({ initial, lastRun, onToast, onCollected }: Pr
           {run && (
             <div className={s.muted}>
               Last run {ago(run.started_at)} ({run.trigger}): {run.companies_checked} companies, {run.postings_seen} openings scanned, {run.matched} matched, {run.inserted} new.
+            </div>
+          )}
+          {run && run.title_matched > 0 && (
+            <div className={s.muted}>
+              {run.title_matched} frontend by title → dropped {run.dropped_level} by level, {run.dropped_age} as older than 14 days, {run.dropped_location} by location.
             </div>
           )}
           {broken > 0 && <div className={s.warnText}>{broken} boards failed on the last check. They&apos;re marked below.</div>}

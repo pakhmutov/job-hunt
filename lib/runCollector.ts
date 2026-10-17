@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { collect, type Company } from "./collector";
 
 /** Runs one collection pass and stores the results through the token-checked RPCs. */
-export async function runCollector(trigger: "cron" | "manual", maxAgeDays = 3) {
+export async function runCollector(trigger: "cron" | "manual", maxAgeDays = 14) {
   const token = process.env.CRON_SECRET;
   if (!token) throw new Error("CRON_SECRET is not set");
 

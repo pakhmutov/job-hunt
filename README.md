@@ -2,11 +2,12 @@
 
 Personal tracker for frontend job applications.
 
-**How jobs arrive:** a Vercel Cron job calls `/api/collect` every morning. It polls the public job-board APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable) of the companies on the *Companies* tab, keeps fresh frontend/React roles in plausible locations and stores them as `New`. A scheduled Claude task then reads each description, scores it against my CV, and moves it to `Kept` (with draft answers) or `Skipped`.
+**How jobs arrive:** a Vercel Cron job calls `/api/collect` every morning. It polls the public job-board APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Workday) of the companies on the *Companies* tab, keeps frontend/React roles from the last 14 days (dropping only senior-management titles, explicit onsite outside the US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC) and stores them as `New`. A scheduled Claude task then reads each description, scores it against my CV, and moves it to `Kept` (with draft answers) or `Skipped`.
 
 **Stack:** Next.js 15 (App Router) · TypeScript · Supabase (Postgres, Auth, Realtime) · CSS Modules · Vercel
 
 ## Features
+- NEW badge, counter and filter for jobs not opened yet (`seen_at is null`); opening a job marks it seen
 - Pipeline views: Active, To apply, Applied, Interviews, Archive
 - Status changes are logged in `job_events` by a Postgres trigger; `applied_on` is set automatically
 - "Waiting" counter highlights applications with no reply after 7 / 14 days

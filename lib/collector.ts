@@ -6,7 +6,7 @@ import { jobId } from "./jobs";
  * Claude's morning task then scores them (status 'New' → 'Kept' / 'Skipped').
  */
 
-export type Ats = "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable";
+export type Ats = "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday";
 export type Company = { id: number; name: string; ats: Ats; slug: string };
 
 export type Posting = {
@@ -33,30 +33,45 @@ export type CollectedJob = {
 
 export type CompanyReport = { id: number; status: string; open: number };
 
-const TITLE_RE = /\b(front[\s-]?end|frontend|react|ui engineer|web engineer|web developer|javascript engineer|typescript engineer|software engineer[,\s-]+(web|ui|frontend)|full[\s-]?stack[^,]*\b(react|typescript|next\.?js))\b/i;
-const TITLE_EXCLUDE_RE = /\b(staff|principal|lead|manager|director|head of|vp|intern|internship|working student|werkstudent|react native|ios|android|mobile|backend|back[\s-]end|qa|designer)\b/i;
+// The collector only pre-filters with a wide margin; Claude makes the real call when scoring.
+const TITLE_RE = /\b(front[\s-]?end|react(\.?js)?|ui (engineer|developer)|web (engineer|developer)|(javascript|typescript) (engineer|developer)|software engineer[,\s-]+(web|ui))\b/i;
+const FULLSTACK_RE = /\bfull[\s-]?stack\b/i;
+const STACK_RE = /\b(react|typescript|next\.?js)\b/i;
+const LEVEL_RE = /\b(staff|principal|lead|manager|director|head)\b/i;
 
-const REMOTEISH_RE = /\b(remote|anywhere|worldwide|global|distributed|europe|emea|eu\b|cet|serbia|belgrade|balkans)\b/i;
-const RELOCATION_PLACES_RE =
-  /\b(germany|berlin|munich|münchen|hamburg|frankfurt|cologne|netherlands|amsterdam|rotterdam|utrecht|ireland|dublin|united kingdom|uk\b|london|manchester|edinburgh|spain|madrid|barcelona|portugal|lisbon|poland|warsaw|krakow|czech|prague|austria|vienna|sweden|stockholm|denmark|copenhagen|finland|helsinki|estonia|tallinn|lithuania|vilnius|latvia|riga|france|paris|belgium|brussels|switzerland|zurich|luxembourg|cyprus|limassol|malta)\b/i;
-const US_RE = /\b(united states|usa|u\.s\.|new york|nyc|san francisco|sf\b|bay area|seattle|austin|boston|chicago|los angeles|denver|atlanta|miami|washington|remote[-,\s]+us\b|us[-\s]remote|us only)\b/i;
+// Places where an onsite/hybrid role is still worth a look: US, UK, Ireland, EU (+ Serbia, home).
+const EUROPE_RE =
+  /\b(europe|european union|emea|eu|cet|uk|united kingdom|great britain|britain|england|scotland|wales|london|manchester|edinburgh|ireland|dublin|germany|berlin|munich|münchen|hamburg|frankfurt|cologne|netherlands|amsterdam|rotterdam|utrecht|belgium|brussels|luxembourg|france|paris|spain|madrid|barcelona|portugal|lisbon|porto|italy|rome|milan|austria|vienna|switzerland|zurich|poland|warsaw|krakow|wroclaw|czech|czechia|prague|slovakia|bratislava|hungary|budapest|romania|bucharest|bulgaria|sofia|greece|athens|croatia|zagreb|slovenia|ljubljana|sweden|stockholm|denmark|copenhagen|finland|helsinki|estonia|tallinn|latvia|riga|lithuania|vilnius|cyprus|limassol|malta|serbia|belgrade|novi sad|balkans)\b/i;
+const US_RE = /\b(united states|usa|us|u\.s\.|new york|nyc|san francisco|bay area|seattle|austin|boston|chicago|los angeles|denver|atlanta|miami|washington)\b/i;
+const GLOBAL_RE = /\b(anywhere|worldwide|global|distributed)\b/i;
+const REMOTE_WORD_RE = /\bremote\b/i;
+// Remote roles limited to these regions can be dropped.
+const REMOTE_LIMITED_RE =
+  /\b(united states|usa|us|u\.s\.|north america|americas|canada|toronto|vancouver|montreal|ottawa|latam|latin america|south america|brazil|mexico|argentina|colombia|chile|apac|asia|asia pacific|india|australia|new zealand|singapore|japan|philippines)\b/i;
+// Onsite/hybrid outside the US/UK/IE/EU. Anything not recognised here counts as unclear and passes.
+const OUTSIDE_RE =
+  /\b(canada|toronto|vancouver|montreal|ottawa|latam|brazil|são paulo|sao paulo|mexico|argentina|buenos aires|colombia|bogota|chile|santiago|india|bangalore|bengaluru|hyderabad|pune|delhi|gurgaon|gurugram|noida|mumbai|chennai|china|shanghai|beijing|shenzhen|hong kong|taiwan|taipei|korea|seoul|japan|tokyo|singapore|australia|sydney|melbourne|new zealand|auckland|philippines|manila|vietnam|indonesia|jakarta|malaysia|kuala lumpur|thailand|bangkok|israel|tel aviv|uae|dubai|abu dhabi|saudi|riyadh|qatar|doha|turkey|türkiye|istanbul|azerbaijan|baku|armenia|yerevan|tbilisi|kazakhstan|almaty|astana|russia|moscow|ukraine|kyiv|kiev|belarus|minsk|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|cape town|johannesburg|pakistan)\b/i;
 const EXCLUDE_ONLY_RE = /\b(us only|usa only|u\.s\. only|canada only|latam only|india only|must reside in the (us|united states)|apac only)\b/i;
-const SPONSOR_RE = /\b(visa sponsorship|sponsor(ship)? (a |your )?visa|relocation (support|package|assistance)|we (will|can) sponsor|blue card|skilled worker visa)\b/i;
 
-export function titleMatches(title: string): boolean {
-  return TITLE_RE.test(title) && !TITLE_EXCLUDE_RE.test(title);
+export type Stage = "title" | "level" | "ok";
+
+/** Title stage: is it a frontend role at all, and is it above the level I'm after? */
+export function titleStage(p: Pick<Posting, "title" | "description">): Stage {
+  const t = p.title;
+  const fullstack = FULLSTACK_RE.test(t) && (STACK_RE.test(t) || !p.description || STACK_RE.test(p.description));
+  if (!TITLE_RE.test(t) && !fullstack) return "title";
+  return LEVEL_RE.test(t) ? "level" : "ok";
 }
 
-/** Rough location gate; Claude makes the final call when scoring. */
+/** Rough location gate: drops only explicit onsite outside US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC. */
 export function locationPlausible(p: Pick<Posting, "location" | "remote" | "description">): boolean {
-  const loc = p.location ?? "";
-  const text = `${loc}\n${p.description.slice(0, 6000)}`;
-  if (EXCLUDE_ONLY_RE.test(text)) return false;
-  if (p.remote && !US_RE.test(loc)) return true;
-  if (REMOTEISH_RE.test(loc) && !US_RE.test(loc)) return true;
-  if (RELOCATION_PLACES_RE.test(loc)) return true;
-  // US or elsewhere: only if the posting itself talks about sponsorship/relocation
-  return SPONSOR_RE.test(p.description);
+  const loc = (p.location ?? "").trim();
+  if (!loc || EUROPE_RE.test(loc)) return true;
+  if (p.remote || REMOTE_WORD_RE.test(loc)) {
+    if (GLOBAL_RE.test(loc)) return true;
+    return !REMOTE_LIMITED_RE.test(loc) && !US_RE.test(loc) && !EXCLUDE_ONLY_RE.test(p.description.slice(0, 6000));
+  }
+  return US_RE.test(loc) || !OUTSIDE_RE.test(loc);
 }
 
 const decode = (t: string) =>
@@ -72,11 +87,16 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-async function getJSON(url: string, timeoutMs = 9000): Promise<unknown> {
+async function getJSON(url: string, body?: unknown, timeoutMs = 9000): Promise<unknown> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { accept: "application/json", "user-agent": "job-hunt-collector/1.0" }, cache: "no-store" });
+    const headers: Record<string, string> = { accept: "application/json", "user-agent": "job-hunt-collector/1.0" };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const res = await fetch(url, {
+      signal: ctrl.signal, headers, cache: "no-store",
+      ...(body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {}),
+    });
     if (res.status === 404) throw new Error("board not found (check slug)");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
@@ -150,7 +170,7 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
       const data = (await getJSON(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&q=front`)) as { content?: Json[] };
       return (data.content ?? []).map((j) => {
         const l = (j.location as Json | undefined) ?? {};
-        const loc = [str(l.city), str(l.region), str(l.country)].filter(Boolean).join(", ") + (l.remote ? " (remote)" : "");
+        const loc = [str(l.city), str(l.region), countryName(str(l.country))].filter(Boolean).join(", ") + (l.remote ? " (remote)" : "");
         return {
           externalId: str(j.id),
           title: str(j.name),
@@ -177,7 +197,44 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
         };
       });
     }
+    case "workday": {
+      // slug = "<tenant>.<wdN>/<site>", e.g. "postman.wd108/careers"
+      const [host, site] = c.slug.split("/");
+      const tenant = host.split(".")[0];
+      const base = `https://${host}.myworkdayjobs.com`;
+      const out: Posting[] = [];
+      for (let offset = 0; offset < 500; offset += 20) {
+        const data = (await getJSON(`${base}/wday/cxs/${tenant}/${site}/jobs`, { appliedFacets: {}, limit: 20, offset, searchText: "" })) as { total?: number; jobPostings?: Json[] };
+        const page = data.jobPostings ?? [];
+        for (const j of page) {
+          const loc = str(j.locationsText);
+          out.push({
+            externalId: str(j.externalPath),
+            title: str(j.title),
+            link: `${base}/${site}${str(j.externalPath)}`,
+            location: loc,
+            remote: str(j.remoteType).toLowerCase() === "remote" || /remote/i.test(loc),
+            publishedAt: workdayPosted(str(j.postedOn)),
+            description: "",
+          });
+        }
+        if (!page.length || offset + 20 >= (data.total ?? 0)) break;
+      }
+      return out;
+    }
   }
+}
+
+/** SmartRecruiters gives ISO codes ("in", "de"); the location regexes need names. */
+function countryName(code: string): string {
+  if (!/^[a-z]{2}$/i.test(code)) return code;
+  try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) ?? code; } catch { return code; }
+}
+
+/** Workday only says "Posted Today" / "Posted 8 Days Ago" / "Posted 30+ Days Ago". */
+function workdayPosted(text: string): string | null {
+  const days = /today/i.test(text) ? 0 : /yesterday/i.test(text) ? 1 : Number(text.match(/(\d+)\+?\s*days?/i)?.[1] ?? NaN);
+  return Number.isFinite(days) ? new Date(Date.now() - days * 864e5).toISOString() : null;
 }
 
 async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -192,6 +249,8 @@ async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): P
 export async function collect(companies: Company[], maxAgeDays: number) {
   const cutoff = Date.now() - maxAgeDays * 864e5;
   let seen = 0;
+  // Funnel, so a run that matches nothing shows which stage ate everything.
+  const funnel = { title_matched: 0, dropped_level: 0, dropped_age: 0, dropped_location: 0 };
   const errors: { company: string; error: string }[] = [];
   const reports: CompanyReport[] = [];
   const jobs: CollectedJob[] = [];
@@ -200,12 +259,16 @@ export async function collect(companies: Company[], maxAgeDays: number) {
     try {
       const postings = await fetchPostings(c);
       seen += postings.length;
-      const fe = postings.filter((p) => titleMatches(p.title));
-      reports.push({ id: c.id, status: "ok", open: fe.length });
-      for (const p of fe) {
+      const fe = postings.filter((p) => titleStage(p) !== "title");
+      const fit = fe.filter((p) => titleStage(p) === "ok");
+      funnel.title_matched += fe.length;
+      funnel.dropped_level += fe.length - fit.length;
+      reports.push({ id: c.id, status: "ok", open: fit.length });
+      for (const p of fit) {
         const ts = p.publishedAt ? Date.parse(p.publishedAt) : NaN;
-        if (Number.isFinite(ts) && ts < cutoff) continue;
-        if (!p.link || !locationPlausible(p)) continue;
+        if (Number.isFinite(ts) && ts < cutoff) { funnel.dropped_age++; continue; }
+        if (!locationPlausible(p)) { funnel.dropped_location++; continue; }
+        if (!p.link) continue;
         jobs.push({
           id: jobId(p.link),
           link: p.link,
@@ -225,5 +288,5 @@ export async function collect(companies: Company[], maxAgeDays: number) {
     }
   });
 
-  return { jobs, reports, stats: { companies: companies.length, seen, matched: jobs.length, errors } };
+  return { jobs, reports, stats: { companies: companies.length, seen, ...funnel, matched: jobs.length, errors } };
 }

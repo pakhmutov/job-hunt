@@ -72,6 +72,16 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
     setJobs((prev) => prev.map((j) => (j.id === id ? (data as Job) : j)));
   }
 
+  async function markAllSeen() {
+    const ids = jobs.filter((j) => !j.seen_at).map((j) => j.id);
+    if (!ids.length) return;
+    const at = new Date().toISOString();
+    const { error } = await supabase.from("jobs").update({ seen_at: at }).in("id", ids);
+    if (error) { setToast("Couldn't mark jobs as seen."); return; }
+    setJobs((prev) => prev.map((j) => (ids.includes(j.id) ? { ...j, seen_at: at } : j)));
+    setToast(`Marked ${ids.length} as seen`);
+  }
+
   async function reload() {
     const { data } = await supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000);
     if (data) setJobs(data as Job[]);
@@ -88,7 +98,8 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
     const rows = csvToJobs(await file.text());
     if (!rows.length) { setToast("No rows found. The file needs Company and Link columns."); return; }
     const existing = new Map(jobs.map((j) => [j.id, j]));
-    const merged = rows.map((r) => ({ ...r, my_notes: r.my_notes ?? existing.get(r.id!)?.my_notes ?? null }));
+    const now = new Date().toISOString();
+    const merged = rows.map((r) => ({ ...r, my_notes: r.my_notes ?? existing.get(r.id!)?.my_notes ?? null, seen_at: existing.has(r.id!) ? existing.get(r.id!)!.seen_at : now }));
     const { data, error } = await supabase.from("jobs").upsert(merged, { onConflict: "id" }).select();
     if (error) { setToast(`Import failed: ${error.message}`); return; }
     const byId = new Map((data as Job[]).map((j) => [j.id, j]));
@@ -112,6 +123,7 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
     const replied = by(PROGRESS) + jobs.filter((j) => j.status === "Rejected").length;
     return {
       fresh: jobs.filter((j) => j.status === "New").length,
+      unseen: jobs.filter((j) => !j.seen_at).length,
       toApply: jobs.filter((j) => j.status === "Kept").length,
       waiting: by(WAITING),
       progress: by(PROGRESS),
@@ -125,13 +137,16 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
     const test = (VIEWS.find((v) => v.key === view) ?? VIEWS[0]).test;
     const q = query.trim().toLowerCase();
     return jobs
-      .filter(test)
+      // A NEW row opened in the New view becomes seen; keep it on screen until it's closed.
+      .filter((j) => test(j) || (view === "unseen" && open.has(j.id)))
       .filter((j) => !q || [j.company, j.title, j.why, j.location_notes, j.my_notes, j.hiring_note].join(" ").toLowerCase().includes(q))
       .sort((a, b) => (b.applied_on ?? b.found_on).localeCompare(a.applied_on ?? a.found_on) || a.company.localeCompare(b.company));
-  }, [jobs, view, query]);
+  }, [jobs, view, query, open]);
 
-  const toggle = (id: string) =>
-    setOpen((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggle = (job: Job) => {
+    if (!open.has(job.id) && !job.seen_at) patch(job.id, { seen_at: new Date().toISOString() });
+    setOpen((prev) => { const n = new Set(prev); n.has(job.id) ? n.delete(job.id) : n.add(job.id); return n; });
+  };
 
   return (
     <div className={s.wrap}>
@@ -166,6 +181,7 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
       ) : (<>
 
       <section className={s.stats} aria-label="Summary">
+        <Stat n={counts.unseen} label="New" onClick={() => pickView("unseen")} />
         <Stat n={counts.toApply} label="To apply" onClick={() => pickView("toapply")} />
         <Stat n={counts.fresh} label="Unreviewed" onClick={() => pickView("new")} />
         <Stat n={counts.waiting} label="Waiting for reply" onClick={() => pickView("applied")} />
@@ -181,10 +197,13 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
             </button>
           ))}
         </div>
-        <input
-          className={s.search} type="search" placeholder="Search company, title, notes"
-          aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)}
-        />
+        <div className={s.barEnd}>
+          {counts.unseen > 0 && <button type="button" className={s.small} onClick={markAllSeen}>Mark all as seen</button>}
+          <input
+            className={s.search} type="search" placeholder="Search company, title, notes"
+            aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
       </div>
 
       {!jobs.length ? (
@@ -197,7 +216,7 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
       ) : (
         <div className={s.list}>
           {rows.map((j) => (
-            <JobRow key={j.id} job={j} open={open.has(j.id)} onToggle={() => toggle(j.id)} onPatch={patch} onDelete={remove} onToast={setToast} />
+            <JobRow key={j.id} job={j} open={open.has(j.id)} onToggle={() => toggle(j)} onPatch={patch} onDelete={remove} onToast={setToast} />
           ))}
         </div>
       )}
@@ -268,7 +287,7 @@ function JobRow({ job, open, onToggle, onPatch, onDelete, onToast }: Props2) {
       <div className={s.rowMain} onClick={onToggle} role="button" tabIndex={0} aria-expanded={open}
         onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) onToggle(); }}>
         <div className={s.who}>
-          <div className={s.company}>{job.company}</div>
+          <div className={s.company}>{job.company}{!job.seen_at && <span className={s.newBadge}>NEW</span>}</div>
           <div className={s.title} title={job.title}>{job.title}</div>
         </div>
         <StatusSelect job={job} onPatch={onPatch} />
@@ -369,6 +388,7 @@ function AddDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (row: Parti
       title: String(f.get("title")).trim(),
       status,
       location_notes: String(f.get("loc")).trim() || null,
+      seen_at: new Date().toISOString(),
       applied_on: status === "Applied" ? todayISO() : null,
     });
     setBusy(false);
