@@ -121,7 +121,9 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
         return {
           externalId: str(j.id),
           title: str(j.title),
-          link: str(j.absolute_url),
+          // Some boards (Elastic) link to their own site as ?gh_jid=…; jobId() drops the query, so every
+          // posting would collapse into one id. Use the Greenhouse page instead.
+          link: /[?&]gh_jid=/.test(str(j.absolute_url)) ? `https://job-boards.greenhouse.io/${c.slug}/jobs/${str(j.id)}` : str(j.absolute_url),
           location: loc,
           remote: /remote/i.test(loc),
           publishedAt: str(j.first_published) || str(j.updated_at) || null,
