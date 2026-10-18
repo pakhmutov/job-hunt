@@ -87,7 +87,7 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-async function getJSON(url: string, body?: unknown, timeoutMs = 9000): Promise<unknown> {
+export async function getJSON(url: string, body?: unknown, timeoutMs = 9000): Promise<unknown> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -108,65 +108,71 @@ async function getJSON(url: string, body?: unknown, timeoutMs = 9000): Promise<u
   }
 }
 
-type Json = Record<string, unknown>;
-const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+export type Json = Record<string, unknown>;
+export const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+
+export const leverHost = (ats: Ats) => (ats === "lever_eu" ? "api.eu.lever.co" : "api.lever.co");
+export const ashbyBoardUrl = (slug: string) => `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(slug)}?includeCompensation=true`;
+
+export function greenhousePosting(j: Json, slug: string): Posting {
+  const loc = str((j.location as Json | undefined)?.name);
+  return {
+    externalId: str(j.id),
+    title: str(j.title),
+    // Some boards (Elastic) link to their own site as ?gh_jid=…; jobId() drops the query, so every
+    // posting would collapse into one id. Use the Greenhouse page instead.
+    link: /[?&]gh_jid=/.test(str(j.absolute_url)) ? `https://job-boards.greenhouse.io/${slug}/jobs/${str(j.id)}` : str(j.absolute_url),
+    location: loc,
+    remote: /remote/i.test(loc),
+    publishedAt: str(j.first_published) || str(j.updated_at) || null,
+    description: htmlToText(str(j.content)),
+  };
+}
+
+export function leverPosting(j: Json): Posting {
+  const cat = (j.categories as Json | undefined) ?? {};
+  const loc = [str(cat.location), ...((cat.allLocations as string[] | undefined) ?? [])].filter(Boolean).join("; ");
+  return {
+    externalId: str(j.id),
+    title: str(j.text),
+    link: str(j.hostedUrl),
+    location: loc,
+    remote: str(j.workplaceType) === "remote" || /remote/i.test(loc),
+    publishedAt: typeof j.createdAt === "number" ? new Date(j.createdAt).toISOString() : null,
+    description: [str(j.descriptionPlain), ...((j.lists as Json[] | undefined) ?? []).map((l) => `${str(l.text)}\n${htmlToText(str(l.content))}`), str(j.additionalPlain)].join("\n\n"),
+  };
+}
+
+export function ashbyPosting(j: Json): Posting {
+  const secondary = ((j.secondaryLocations as Json[] | undefined) ?? []).map((s) => str(s.location));
+  const loc = [str(j.location), ...secondary].filter(Boolean).join("; ");
+  const comp = str((j.compensation as Json | undefined)?.compensationTierSummary);
+  return {
+    externalId: str(j.id),
+    title: str(j.title),
+    link: str(j.jobUrl),
+    location: loc,
+    remote: j.isRemote === true || str(j.workplaceType).toLowerCase() === "remote",
+    publishedAt: str(j.publishedAt) || null,
+    description: (comp ? `Compensation: ${comp}\n\n` : "") + str(j.descriptionPlain),
+  };
+}
 
 export async function fetchPostings(c: Company): Promise<Posting[]> {
   const slug = encodeURIComponent(c.slug);
   switch (c.ats) {
     case "greenhouse": {
       const data = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`)) as { jobs?: Json[] };
-      return (data.jobs ?? []).map((j) => {
-        const loc = str((j.location as Json | undefined)?.name);
-        return {
-          externalId: str(j.id),
-          title: str(j.title),
-          // Some boards (Elastic) link to their own site as ?gh_jid=…; jobId() drops the query, so every
-          // posting would collapse into one id. Use the Greenhouse page instead.
-          link: /[?&]gh_jid=/.test(str(j.absolute_url)) ? `https://job-boards.greenhouse.io/${c.slug}/jobs/${str(j.id)}` : str(j.absolute_url),
-          location: loc,
-          remote: /remote/i.test(loc),
-          publishedAt: str(j.first_published) || str(j.updated_at) || null,
-          description: htmlToText(str(j.content)),
-        };
-      });
+      return (data.jobs ?? []).map((j) => greenhousePosting(j, c.slug));
     }
     case "lever":
     case "lever_eu": {
-      const host = c.ats === "lever_eu" ? "api.eu.lever.co" : "api.lever.co";
-      const data = (await getJSON(`https://${host}/v0/postings/${slug}?mode=json`)) as Json[];
-      return (Array.isArray(data) ? data : []).map((j) => {
-        const cat = (j.categories as Json | undefined) ?? {};
-        const loc = [str(cat.location), ...((cat.allLocations as string[] | undefined) ?? [])].filter(Boolean).join("; ");
-        return {
-          externalId: str(j.id),
-          title: str(j.text),
-          link: str(j.hostedUrl),
-          location: loc,
-          remote: str(j.workplaceType) === "remote" || /remote/i.test(loc),
-          publishedAt: typeof j.createdAt === "number" ? new Date(j.createdAt).toISOString() : null,
-          description: [str(j.descriptionPlain), ...((j.lists as Json[] | undefined) ?? []).map((l) => `${str(l.text)}\n${htmlToText(str(l.content))}`), str(j.additionalPlain)].join("\n\n"),
-        };
-      });
+      const data = (await getJSON(`https://${leverHost(c.ats)}/v0/postings/${slug}?mode=json`)) as Json[];
+      return (Array.isArray(data) ? data : []).map(leverPosting);
     }
     case "ashby": {
-      const data = (await getJSON(`https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`)) as { jobs?: Json[] };
-      return (data.jobs ?? [])
-        .filter((j) => j.isListed !== false)
-        .map((j) => {
-          const secondary = ((j.secondaryLocations as Json[] | undefined) ?? []).map((s) => str(s.location));
-          const loc = [str(j.location), ...secondary].filter(Boolean).join("; ");
-          const comp = str((j.compensation as Json | undefined)?.compensationTierSummary);
-          return {
-            externalId: str(j.id),
-            title: str(j.title),
-            link: str(j.jobUrl),
-            location: loc,
-            remote: j.isRemote === true || str(j.workplaceType).toLowerCase() === "remote",
-            publishedAt: str(j.publishedAt) || null,
-            description: (comp ? `Compensation: ${comp}\n\n` : "") + str(j.descriptionPlain),
-          };
-        });
+      const data = (await getJSON(ashbyBoardUrl(c.slug))) as { jobs?: Json[] };
+      return (data.jobs ?? []).filter((j) => j.isListed !== false).map(ashbyPosting);
     }
     case "smartrecruiters": {
       const data = (await getJSON(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&q=front`)) as { content?: Json[] };
@@ -228,7 +234,7 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
 }
 
 /** SmartRecruiters gives ISO codes ("in", "de"); the location regexes need names. */
-function countryName(code: string): string {
+export function countryName(code: string): string {
   if (!/^[a-z]{2}$/i.test(code)) return code;
   try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) ?? code; } catch { return code; }
 }

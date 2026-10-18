@@ -3,32 +3,47 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  CLOSED, PROGRESS, SENT, STATUSES, TONE, VIEWS, WAITING,
-  csvToJobs, daysSince, jobId, jobsToCSV, todayISO,
-  type CollectRun, type CompanyRow, type Job, type Status, type ViewKey,
+  CLOSED, PROGRESS, SENT, SOURCES, STATUSES, TONE, TRACKED, VIEWS, WAITING,
+  ageLevel, applicationStats, csvToJobs, jobId, jobsToCSV, stageAge, todayISO,
+  type CollectRun, type CompanyRow, type Job, type ReplyEvent, type SourceKey, type Status, type ViewKey,
 } from "@/lib/jobs";
+import { lookupJobAction, saveApplication, type ApplicationInput } from "@/app/actions";
 import Companies from "./Companies";
 import s from "./Dashboard.module.css";
 
-type Props = { initialJobs: Job[]; loadError: string | null; companies: CompanyRow[]; lastRun: CollectRun | null };
+type Props = {
+  initialJobs: Job[];
+  loadError: string | null;
+  companies: CompanyRow[];
+  lastRun: CollectRun | null;
+  replyEvents: ReplyEvent[];
+  /** from /add?url=…: open the "+ Applied" form with this link (null = don't open) */
+  addUrl: string | null;
+};
 
-export default function Dashboard({ initialJobs, loadError, companies, lastRun }: Props) {
+export default function Dashboard({ initialJobs, loadError, companies, lastRun, replyEvents, addUrl }: Props) {
   const [page, setPage] = useState<"jobs" | "companies">("jobs");
   const supabase = useMemo(() => createClient(), []);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [view, setView] = useState<ViewKey>("active");
+  const [source, setSource] = useState<SourceKey>("all");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [applying, setApplying] = useState<string | null>(addUrl);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
       const v = localStorage.getItem("jh-view") as ViewKey | null;
       if (v && VIEWS.some((x) => x.key === v)) setView(v);
+      const src = localStorage.getItem("jh-source") as SourceKey | null;
+      if (src && SOURCES.some((x) => x.key === src)) setSource(src);
     } catch {}
-  }, []);
+    // Drop ?add=… so a reload doesn't open the form again.
+    if (addUrl !== null) window.history.replaceState(null, "", "/");
+  }, [addUrl]);
 
   // Live updates: new rows from the morning search, edits from another device.
   useEffect(() => {
@@ -58,6 +73,15 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
   function pickView(v: ViewKey) {
     setView(v);
     try { localStorage.setItem("jh-view", v); } catch {}
+  }
+
+  function pickSource(v: SourceKey) {
+    setSource(v);
+    try { localStorage.setItem("jh-source", v); } catch {}
+  }
+
+  function upsertLocal(row: Job) {
+    setJobs((prev) => [row, ...prev.filter((j) => j.id !== row.id)]);
   }
 
   async function patch(id: string, change: Partial<Job>) {
@@ -117,31 +141,32 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
     URL.revokeObjectURL(url);
   }
 
+  // The source filter scopes everything on the Jobs page: tiles, stats, tab counts and the list.
+  const scoped = useMemo(() => jobs.filter((SOURCES.find((x) => x.key === source) ?? SOURCES[0]).test), [jobs, source]);
+
   const counts = useMemo(() => {
-    const by = (set: Set<Status>) => jobs.filter((j) => set.has(j.status)).length;
-    const sent = by(SENT);
-    const replied = by(PROGRESS) + jobs.filter((j) => j.status === "Rejected").length;
+    const by = (set: Set<Status>) => scoped.filter((j) => set.has(j.status)).length;
     return {
-      fresh: jobs.filter((j) => j.status === "New").length,
-      unseen: jobs.filter((j) => !j.seen_at).length,
-      toApply: jobs.filter((j) => j.status === "Kept").length,
+      fresh: scoped.filter((j) => j.status === "New").length,
+      unseen: scoped.filter((j) => !j.seen_at).length,
+      toApply: scoped.filter((j) => j.status === "Kept").length,
       waiting: by(WAITING),
       progress: by(PROGRESS),
-      stale: jobs.filter((j) => WAITING.has(j.status) && (daysSince(j.applied_on) ?? 0) >= 14).length,
-      sent,
-      replyRate: sent ? Math.round((replied / sent) * 100) : null,
+      stale: scoped.filter((j) => WAITING.has(j.status) && (stageAge(j) ?? 0) >= 21).length,
     };
-  }, [jobs]);
+  }, [scoped]);
+
+  const stats = useMemo(() => applicationStats(scoped, replyEvents), [scoped, replyEvents]);
 
   const rows = useMemo(() => {
     const test = (VIEWS.find((v) => v.key === view) ?? VIEWS[0]).test;
     const q = query.trim().toLowerCase();
-    return jobs
+    return scoped
       // A NEW row opened in the New view becomes seen; keep it on screen until it's closed.
       .filter((j) => test(j) || (view === "unseen" && open.has(j.id)))
       .filter((j) => !q || [j.company, j.title, j.why, j.location_notes, j.my_notes, j.hiring_note].join(" ").toLowerCase().includes(q))
       .sort((a, b) => (b.applied_on ?? b.found_on).localeCompare(a.applied_on ?? a.found_on) || a.company.localeCompare(b.company));
-  }, [jobs, view, query, open]);
+  }, [scoped, view, query, open]);
 
   const toggle = (job: Job) => {
     if (!open.has(job.id) && !job.seen_at) patch(job.id, { seen_at: new Date().toISOString() });
@@ -157,13 +182,11 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
             <button type="button" aria-pressed={page === "jobs"} onClick={() => setPage("jobs")}>Jobs</button>
             <button type="button" aria-pressed={page === "companies"} onClick={() => setPage("companies")}>Companies</button>
           </nav>
-          <div className={s.sub}>
-            {jobs.length} jobs tracked · {counts.sent} applications sent
-            {counts.replyRate !== null && <> · {counts.replyRate}% got a reply</>}
-          </div>
+          <div className={s.sub}>{jobs.length} jobs tracked</div>
         </div>
         <div className={s.actions}>
-          <button className="primary" type="button" onClick={() => setAdding(true)}>Add job</button>
+          <button className="primary" type="button" onClick={() => setApplying("")}>+ Applied</button>
+          <button type="button" onClick={() => setAdding(true)}>Add job</button>
           <button type="button" onClick={() => fileRef.current?.click()}>Import CSV</button>
           <button type="button" onClick={exportCSV} disabled={!jobs.length}>Export CSV</button>
           <form action="/auth/signout" method="post"><button type="submit">Sign out</button></form>
@@ -186,14 +209,32 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
         <Stat n={counts.fresh} label="Unreviewed" onClick={() => pickView("new")} />
         <Stat n={counts.waiting} label="Waiting for reply" onClick={() => pickView("applied")} />
         <Stat n={counts.progress} label="Interviews & offers" onClick={() => pickView("progress")} />
-        <Stat n={counts.stale} label="No reply 14+ days" alert={counts.stale > 0} onClick={() => pickView("applied")} />
+        <Stat n={counts.stale} label="No reply 21+ days" alert={counts.stale > 0} onClick={() => pickView("applied")} />
+      </section>
+
+      <section className={s.appStats} aria-label="Applications">
+        <div className={s.tabs} role="group" aria-label="Source">
+          {SOURCES.map((x) => (
+            <button key={x.key} type="button" aria-pressed={x.key === source} onClick={() => pickSource(x.key)}
+              title={x.key === "morning" ? "Collector and morning search" : x.key === "mine" ? "Added by you" : undefined}>
+              {x.label}<span className={s.count}>{jobs.filter(x.test).length}</span>
+            </button>
+          ))}
+        </div>
+        <dl className={s.figures}>
+          <div><dt>Applications</dt><dd>{stats.applied}</dd></div>
+          <div><dt>Replies</dt><dd>{stats.replied}</dd></div>
+          <div><dt>Reply rate</dt><dd>{stats.rate === null ? "—" : `${stats.rate}%`}</dd></div>
+          <div title="From applied date to the first reply stage (HR Screen, Rejected…)"><dt>Avg first reply</dt><dd>{stats.avgReplyDays === null ? "—" : `${stats.avgReplyDays} d`}</dd></div>
+          <div><dt>Waiting &gt; 7 days</dt><dd className={stats.waiting7 ? s.warnText : ""}>{stats.waiting7}</dd></div>
+        </dl>
       </section>
 
       <div className={s.bar}>
         <div className={s.tabs} role="group" aria-label="View">
           {VIEWS.map((v) => (
             <button key={v.key} type="button" aria-pressed={v.key === view} onClick={() => pickView(v.key)}>
-              {v.label}<span className={s.count}>{jobs.filter(v.test).length}</span>
+              {v.label}<span className={s.count}>{scoped.filter(v.test).length}</span>
             </button>
           ))}
         </div>
@@ -229,9 +270,24 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun }
           onAdd={async (row) => {
             const { data, error } = await supabase.from("jobs").insert(row).select().single();
             if (error) { setToast(error.code === "23505" ? "That job is already in the tracker." : "Couldn't add the job."); return; }
-            setJobs((prev) => [data as Job, ...prev.filter((j) => j.id !== (data as Job).id)]);
+            upsertLocal(data as Job);
             setAdding(false);
             setToast("Added");
+          }}
+        />
+      )}
+
+      {applying !== null && (
+        <ApplyDialog
+          initialLink={applying}
+          findJob={(id) => jobs.find((j) => j.id === id)}
+          onClose={() => setApplying(null)}
+          onSave={async (input) => {
+            const r = await saveApplication(input).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+            if (!r.ok) { setToast(`Couldn't save: ${r.error}`); return false; }
+            upsertLocal(r.job);
+            setToast(r.message);
+            return true;
           }}
         />
       )}
@@ -264,11 +320,32 @@ function StatusSelect({ job, onPatch }: { job: Job; onPatch: Props2["onPatch"] }
   );
 }
 
-function Waiting({ job }: { job: Job }) {
-  const d = daysSince(job.applied_on);
+/** Days in the current stage (Applied … Final). Only highlights; statuses never change on their own. */
+function Since({ job }: { job: Job }) {
+  const d = stageAge(job);
   if (d === null) return <span className={`${s.age} mono`}>—</span>;
-  const cls = WAITING.has(job.status) ? (d >= 14 ? s.ageBad : d >= 7 ? s.ageWarn : "") : "";
-  return <span className={`${s.age} ${cls} mono`} title="Days since you applied">{d}d</span>;
+  const { tone, hint } = ageLevel(d);
+  const cls = tone === "warn" ? s.ageWarn : tone === "mute" ? s.ageMute : "";
+  const what = job.status === "Applied" ? "since you applied" : `in ${job.status}`;
+  return (
+    <span className={s.since} title={`${d} ${d === 1 ? "day" : "days"} ${what}${hint ? ` · ${hint}` : ""}`}>
+      <span className={`${s.age} ${cls} mono`}>{d} {d === 1 ? "day" : "days"}</span>
+      {hint && <span className={s.ageHint}>{hint}</span>}
+    </span>
+  );
+}
+
+const QUICK: Status[] = ["Rejected", "HR Screen", "Ghosted", "Withdrawn"];
+
+function QuickActions({ job, onPatch }: { job: Job; onPatch: Props2["onPatch"] }) {
+  if (!TRACKED.has(job.status)) return null;
+  return (
+    <div className={s.quick} onClick={(e) => e.stopPropagation()} role="group" aria-label={`Quick status for ${job.company}`}>
+      {QUICK.filter((st) => st !== job.status).map((st) => (
+        <button key={st} type="button" className={s[`q_${TONE[st]}`]} onClick={() => onPatch(job.id, { status: st })}>{st}</button>
+      ))}
+    </div>
+  );
 }
 
 type Props2 = {
@@ -289,6 +366,7 @@ function JobRow({ job, open, onToggle, onPatch, onDelete, onToast }: Props2) {
         <div className={s.who}>
           <div className={s.company}>{job.company}{!job.seen_at && <span className={s.newBadge}>NEW</span>}</div>
           <div className={s.title} title={job.title}>{job.title}</div>
+          <QuickActions job={job} onPatch={onPatch} />
         </div>
         <StatusSelect job={job} onPatch={onPatch} />
         <div className={s.cell}><span className={s.k}>Found</span><span className="mono">{job.found_on}</span></div>
@@ -299,7 +377,7 @@ function JobRow({ job, open, onToggle, onPatch, onDelete, onToast }: Props2) {
             onChange={(e) => onPatch(job.id, { applied_on: e.target.value || null })}
           />
         </div>
-        <div className={s.cell}><span className={s.k}>Waiting</span><Waiting job={job} /></div>
+        <div className={s.cell}><span className={s.k}>Since</span><Since job={job} /></div>
         <div className={s.cell}><span className={s.k}>Score</span><span className="mono">{job.score ?? "—"}</span></div>
         <div className={`${s.cell} ${s.locCell}`}><span className={s.k}>Location</span><span className={s.loc} title={job.location_notes ?? ""}>{job.location_notes || "—"}</span></div>
       </div>
@@ -328,7 +406,7 @@ function Detail({ job, onPatch, onDelete, onToast }: Omit<Props2, "open" | "onTo
         <h4>Link</h4><p><a href={job.link} target="_blank" rel="noopener noreferrer">{job.link}</a></p>
         <h4>Why</h4><p>{job.why || "—"}</p>
         <h4>Location</h4><p>{job.location_notes || "—"}{job.setup ? ` (${job.setup})` : ""}</p>
-        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}{job.source === "collector" ? " · from company board" : ""}</p>
+        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}{job.source === "collector" ? " · from company board" : job.source === "manual" ? " · added by you" : ""}</p>
         {job.location_raw && <><h4>Board location</h4><p>{job.location_raw}</p></>}
         {job.description && (
           <details className={s.desc}>
@@ -388,6 +466,7 @@ function AddDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (row: Parti
       title: String(f.get("title")).trim(),
       status,
       location_notes: String(f.get("loc")).trim() || null,
+      source: "manual",
       seen_at: new Date().toISOString(),
       applied_on: status === "Applied" ? todayISO() : null,
     });
@@ -407,6 +486,102 @@ function AddDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (row: Parti
         <label>Location notes<input name="loc" /></label>
         <div className={s.actions}>
           <button className="primary" type="submit" disabled={busy}>{busy ? "Adding…" : "Add"}</button>
+          <button type="button" onClick={() => ref.current?.close()}>Cancel</button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+const VIA: Record<string, string> = {
+  greenhouse: "Greenhouse API", lever: "Lever API", lever_eu: "Lever API", ashby: "Ashby API", page: "the job page",
+};
+
+type ApplyProps = {
+  initialLink: string;
+  findJob: (id: string) => Job | undefined;
+  onClose: () => void;
+  onSave: (input: ApplicationInput) => Promise<boolean>;
+};
+
+/** "+ Applied": log an application found outside the collector. Pasting a link pre-fills company and title. */
+function ApplyDialog({ initialLink, findJob, onClose, onSave }: ApplyProps) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [link, setLink] = useState(initialLink);
+  const [company, setCompany] = useState("");
+  const [title, setTitle] = useState("");
+  const [appliedOn, setAppliedOn] = useState(todayISO());
+  const [notes, setNotes] = useState("");
+  const [extra, setExtra] = useState<ApplicationInput["extra"]>(null);
+  const [looking, setLooking] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const looked = useRef("");
+  const seq = useRef(0);
+  // Last auto-filled values: a field the user has edited since isn't overwritten.
+  const auto = useRef({ company: "", title: "" });
+
+  useEffect(() => {
+    ref.current?.showModal();
+    if (initialLink) lookup(initialLink);
+  }, []);
+
+  const valid = (v: string) => { try { return /^https?:$/.test(new URL(v.trim()).protocol); } catch { return false; } };
+  const existing = valid(link) ? findJob(jobId(link.trim())) : undefined;
+
+  async function lookup(raw: string) {
+    const v = raw.trim();
+    if (!valid(v) || v === looked.current) return;
+    looked.current = v;
+    const n = ++seq.current;
+    setLooking(true);
+    setHint(null);
+    const r = await lookupJobAction(v).catch(() => null);
+    if (n !== seq.current) return;
+    setLooking(false);
+    if (!r || !r.ok) { setHint("Couldn't read the page. Fill in the fields yourself."); return; }
+    const { company: c, title: t, via, ...rest } = r.data;
+    setCompany((cur) => (c && (!cur || cur === auto.current.company) ? c : cur));
+    setTitle((cur) => (t && (!cur || cur === auto.current.title) ? t : cur));
+    auto.current = { company: c ?? "", title: t ?? "" };
+    setExtra(rest);
+    setHint(via && (c || t) ? `Filled in from ${VIA[via]}${rest.location_raw ? ` · ${rest.location_raw}` : ""}` : `Nothing found on the page${r.note ? ` (${r.note})` : ""}. Fill in the fields yourself.`);
+  }
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    // Lookup results belong to the link they were fetched for.
+    const sameLink = looked.current === link.trim();
+    const ok = await onSave({ link, company, title, applied_on: appliedOn, my_notes: notes, found_on: todayISO(), extra: sameLink ? extra : null });
+    setBusy(false);
+    if (ok) ref.current?.close();
+  }
+
+  return (
+    <dialog ref={ref} className={s.dialog} onClose={onClose}>
+      <form className={s.form} onSubmit={submit}>
+        <strong>Log an application</strong>
+        <label>Link
+          <input
+            name="link" type="url" placeholder="https://…" required autoFocus value={link}
+            onChange={(e) => setLink(e.target.value)}
+            onPaste={(e) => { const v = e.clipboardData.getData("text"); if (v) setTimeout(() => lookup(v), 0); }}
+            onBlur={(e) => lookup(e.target.value)}
+          />
+        </label>
+        {(looking || hint || existing) && (
+          <p className={s.formHint} role="status">
+            {looking ? "Reading the job page…" : hint}
+            {existing && <>{(looking || hint) && <br />}Already tracked as <b>{existing.status}</b>. {SENT.has(existing.status) ? "Saving fills in the applied date only." : "Saving marks it Applied and keeps score, notes and drafts."}</>}
+          </p>
+        )}
+        <label>Company<input name="company" value={company} onChange={(e) => setCompany(e.target.value)} placeholder={looking ? "…" : ""} /></label>
+        <label>Title<input name="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={looking ? "…" : ""} /></label>
+        <label>Applied on<input name="applied_on" type="date" value={appliedOn} onChange={(e) => setAppliedOn(e.target.value)} required /></label>
+        <label>My notes<textarea name="my_notes" className={s.notes} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Referral, recruiter name, salary you asked…" /></label>
+        <div className={s.actions}>
+          <button className="primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save as Applied"}</button>
           <button type="button" onClick={() => ref.current?.close()}>Cancel</button>
         </div>
       </form>

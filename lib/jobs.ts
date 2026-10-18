@@ -67,6 +67,8 @@ export type Job = {
   description: string | null;
   /** null until the job is opened in the UI */
   seen_at: string | null;
+  /** set by a trigger when the status changes; null if it never changed since insert */
+  status_changed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -83,6 +85,69 @@ export const VIEWS: { key: ViewKey; label: string; test: (j: Job) => boolean }[]
   { key: "archive", label: "Archive", test: (j) => CLOSED.has(j.status) },
   { key: "all", label: "All", test: () => true },
 ];
+
+export type SourceKey = "all" | "morning" | "mine";
+
+export const SOURCES: { key: SourceKey; label: string; test: (j: Job) => boolean }[] = [
+  { key: "all", label: "All", test: () => true },
+  { key: "morning", label: "Morning", test: (j) => j.source === "collector" || j.source === "search" },
+  { key: "mine", label: "Mine", test: (j) => j.source === "manual" },
+];
+
+/** Applied … Final: the stages where "N days" since the last move is worth showing. */
+export const TRACKED = new Set<Status>(["Applied", "Auto-Interview", "HR Screen", "Tech Interview", "Test Task", "Final"]);
+/** A reply from the company: anything past Applied except Ghosted / Withdrawn / Closed. */
+export const REPLIED = new Set<Status>([...PROGRESS, "Rejected"]);
+
+/** Timestamps → the local calendar day, so "today" matches the user's clock. */
+function localDay(iso: string | null): string | null {
+  if (!iso || !iso.includes("T")) return iso;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Days in the current stage. "Applied" counts from applied_on (editable in the list);
+ * later stages count from the last status change, falling back to applied_on.
+ */
+export function stageAge(j: Pick<Job, "status" | "applied_on" | "status_changed_at">): number | null {
+  if (!TRACKED.has(j.status)) return null;
+  const since = j.status === "Applied" ? j.applied_on ?? j.status_changed_at : j.status_changed_at ?? j.applied_on;
+  return daysSince(localDay(since));
+}
+
+export function ageLevel(days: number | null): { tone: "" | "warn" | "mute"; hint: string | null } {
+  if (days === null || days < 7) return { tone: "", hint: null };
+  return days < 21 ? { tone: "warn", hint: "follow up?" } : { tone: "mute", hint: "likely ghosted" };
+}
+
+/** Status changes that count as the first reply (from job_events). */
+export type ReplyEvent = { job_id: string; to_status: Status; at: string };
+
+export function applicationStats(jobs: Job[], events: ReplyEvent[]) {
+  const firstReply = new Map<string, string>();
+  for (const e of events) {
+    if (!REPLIED.has(e.to_status)) continue;
+    const cur = firstReply.get(e.job_id);
+    if (!cur || e.at < cur) firstReply.set(e.job_id, e.at);
+  }
+  const applied = jobs.filter((j) => SENT.has(j.status) || (!!j.applied_on && (j.status === "Withdrawn" || j.status === "Closed")));
+  // A reply that later turned into Withdrawn still counts, so check the event log too.
+  const replied = applied.filter((j) => REPLIED.has(j.status) || firstReply.has(j.id));
+  const waits = replied.flatMap((j) => {
+    const at = firstReply.get(j.id) ?? (REPLIED.has(j.status) ? j.status_changed_at : null);
+    const from = daysSince(j.applied_on), to = daysSince(localDay(at));
+    return from !== null && to !== null && from >= to ? [from - to] : [];
+  });
+  return {
+    applied: applied.length,
+    replied: replied.length,
+    rate: applied.length ? Math.round((replied.length / applied.length) * 100) : null,
+    avgReplyDays: waits.length ? Math.round((waits.reduce((a, b) => a + b, 0) / waits.length) * 10) / 10 : null,
+    waiting7: jobs.filter((j) => j.status === "Applied" && (stageAge(j) ?? 0) > 7).length,
+  };
+}
 
 /** Same id rule the morning search uses, so one posting is one row. */
 export function jobId(link: string): string {
