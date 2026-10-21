@@ -9,6 +9,8 @@ import {
 } from "@/lib/jobs";
 import { lookupJobAction, saveApplication, type ApplicationInput } from "@/app/actions";
 import Companies from "./Companies";
+import Sources from "./Sources";
+import type { AggregatorRow } from "@/lib/aggregators/types";
 import s from "./Dashboard.module.css";
 
 type Props = {
@@ -16,13 +18,14 @@ type Props = {
   loadError: string | null;
   companies: CompanyRow[];
   lastRun: CollectRun | null;
+  aggregators: AggregatorRow[];
   replyEvents: ReplyEvent[];
   /** from /add?url=…: open the "+ Applied" form with this link (null = don't open) */
   addUrl: string | null;
 };
 
-export default function Dashboard({ initialJobs, loadError, companies, lastRun, replyEvents, addUrl }: Props) {
-  const [page, setPage] = useState<"jobs" | "companies">("jobs");
+export default function Dashboard({ initialJobs, loadError, companies, lastRun, aggregators, replyEvents, addUrl }: Props) {
+  const [page, setPage] = useState<"jobs" | "companies" | "sources">("jobs");
   const supabase = useMemo(() => createClient(), []);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [view, setView] = useState<ViewKey>("active");
@@ -181,6 +184,7 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun, 
           <nav className={s.nav} aria-label="Sections">
             <button type="button" aria-pressed={page === "jobs"} onClick={() => setPage("jobs")}>Jobs</button>
             <button type="button" aria-pressed={page === "companies"} onClick={() => setPage("companies")}>Companies</button>
+            <button type="button" aria-pressed={page === "sources"} onClick={() => setPage("sources")}>Sources</button>
           </nav>
           <div className={s.sub}>{jobs.length} jobs tracked</div>
         </div>
@@ -201,6 +205,8 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun, 
 
       {page === "companies" ? (
         <Companies initial={companies} lastRun={lastRun} onToast={setToast} onCollected={reload} />
+      ) : page === "sources" ? (
+        <Sources initial={aggregators} onToast={setToast} onCollected={reload} />
       ) : (<>
 
       <section className={s.stats} aria-label="Summary">
@@ -406,7 +412,7 @@ function Detail({ job, onPatch, onDelete, onToast }: Omit<Props2, "open" | "onTo
         <h4>Link</h4><p><a href={job.link} target="_blank" rel="noopener noreferrer">{job.link}</a></p>
         <h4>Why</h4><p>{job.why || "—"}</p>
         <h4>Location</h4><p>{job.location_notes || "—"}{job.setup ? ` (${job.setup})` : ""}</p>
-        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}{job.source === "collector" ? " · from company board" : job.source === "manual" ? " · added by you" : ""}</p>
+        <h4>Posted</h4><p className="mono">{job.posted_on || "—"}{job.source === "collector" ? " · from company board" : job.source === "aggregator" ? " · from VC board" : job.source === "manual" ? " · added by you" : ""}</p>
         {job.location_raw && <><h4>Board location</h4><p>{job.location_raw}</p></>}
         {job.description && (
           <details className={s.desc}>

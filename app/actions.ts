@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { jobId, normDate, SENT, type Job } from "@/lib/jobs";
 import { lookupJob, type Lookup } from "@/lib/lookup";
+import { PLATFORMS, type AggregatorRow, type Platform } from "@/lib/aggregators";
 
 // Same gate as /api/collect/manual: the signed-in owner only. Queries run with the user's
 // session, so RLS (is_owner) applies on top.
@@ -104,4 +105,34 @@ export async function saveApplication(input: ApplicationInput): Promise<SaveResu
     return { ok: false, error: error.message };
   }
   return { ok: true, job: data as Job, created: true, message: "Added as Applied" };
+}
+
+export type AggregatorInput = {
+  id?: string;
+  name: string;
+  platform: Platform;
+  base_url: string;
+  board_id: string;
+  query: Record<string, unknown>;
+  enabled: boolean;
+};
+
+/** Add or edit a VC board on the Sources tab. Validated again here, the form isn't trusted. */
+export async function saveAggregator(input: AggregatorInput): Promise<{ ok: true; row: AggregatorRow } | { ok: false; error: string }> {
+  const supabase = await ownerClient();
+  if (!supabase) return { ok: false, error: "Not signed in" };
+  const name = input.name.trim();
+  const base_url = input.base_url.trim().replace(/\/+$/, "");
+  const board_id = input.board_id.trim();
+  if (!name || !board_id) return { ok: false, error: "Name and board id are required" };
+  if (!PLATFORMS.includes(input.platform)) return { ok: false, error: `Unknown platform: ${input.platform}` };
+  if (!/^https:\/\/[^/\s]+$/i.test(base_url)) return { ok: false, error: "Base URL must look like https://jobs.example.com" };
+  if (!input.query || typeof input.query !== "object" || Array.isArray(input.query)) return { ok: false, error: "Query must be a JSON object" };
+
+  const row = { name, platform: input.platform, base_url, board_id, query: input.query, enabled: !!input.enabled };
+  const { data, error } = input.id
+    ? await supabase.from("aggregators").update(row).eq("id", input.id).select().single()
+    : await supabase.from("aggregators").insert(row).select().single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, row: data as AggregatorRow };
 }

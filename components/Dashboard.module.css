@@ -143,9 +143,22 @@
 .companyRow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .companyRow:last-child { border-bottom: 0; }
 .companyRow .rowAct { margin-top: 0; }
+.sourceForm { display: grid; grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1.3fr) minmax(0, 1fr); gap: 10px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.sourceForm label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+.sourceForm input, .sourceForm select { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 7px 10px; color: var(--fg); min-width: 0; }
+.sourceForm .wide { grid-column: 1 / -1; }
+.sourceForm textarea { font-size: 12px; min-height: 96px; color: var(--fg); }
+.sourceForm .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); }
+.formEnd { grid-column: 2 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+.sourceRow { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.sourceRow:last-child { border-bottom: 0; }
+.sourceRow .rowAct { margin-top: 0; }
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .addCompany { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .addCompany .wide { grid-column: 1 / -1; }
   .companyRow { grid-template-columns: minmax(0, 1fr); }
+  .sourceForm { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .formEnd { grid-column: 1 / -1; }
+  .sourceRow { grid-template-columns: minmax(0, 1fr); }
 }

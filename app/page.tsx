@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import Dashboard from "@/components/Dashboard";
+import type { AggregatorRow } from "@/lib/aggregators/types";
 import { REPLIED, type CollectRun, type CompanyRow, type Job, type ReplyEvent } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +22,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
   }
 
   const { add } = await searchParams;
-  const [{ data, error }, { data: companies }, { data: runs }, { data: events }] = await Promise.all([
+  const [{ data, error }, { data: companies }, { data: runs }, { data: aggregators }, { data: events }] = await Promise.all([
     supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000),
     supabase.from("companies").select("*").order("name"),
     supabase.from("collect_runs").select("*").order("started_at", { ascending: false }).limit(1),
+    supabase.from("aggregators").select("*").order("name"),
     // Real status changes into a reply stage, for "average days until the first reply".
     supabase.from("job_events").select("job_id, to_status, at").not("from_status", "is", null).in("to_status", [...REPLIED]).limit(5000),
   ]);
@@ -34,6 +36,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
       loadError={error?.message ?? null}
       companies={(companies ?? []) as CompanyRow[]}
       lastRun={(runs?.[0] as CollectRun | undefined) ?? null}
+      aggregators={(aggregators ?? []) as AggregatorRow[]}
       replyEvents={(events ?? []) as ReplyEvent[]}
       addUrl={typeof add === "string" ? add : Array.isArray(add) ? add[0] ?? "" : null}
     />

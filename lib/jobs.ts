@@ -60,7 +60,7 @@ export type Job = {
   applied_on: string | null;
   my_notes: string | null;
   setup: "remote" | "relocation" | null;
-  source: "search" | "collector" | "manual" | "import";
+  source: "search" | "collector" | "manual" | "import" | "aggregator";
   company_id: number | null;
   published_at: string | null;
   location_raw: string | null;
@@ -86,11 +86,12 @@ export const VIEWS: { key: ViewKey; label: string; test: (j: Job) => boolean }[]
   { key: "all", label: "All", test: () => true },
 ];
 
-export type SourceKey = "all" | "morning" | "mine";
+export type SourceKey = "all" | "morning" | "boards" | "mine";
 
 export const SOURCES: { key: SourceKey; label: string; test: (j: Job) => boolean }[] = [
   { key: "all", label: "All", test: () => true },
   { key: "morning", label: "Morning", test: (j) => j.source === "collector" || j.source === "search" },
+  { key: "boards", label: "VC boards", test: (j) => j.source === "aggregator" },
   { key: "mine", label: "Mine", test: (j) => j.source === "manual" },
 ];
 
