@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { collectAggregator, type AggregatorRow, type RunResult } from "@/lib/aggregators";
+import { checkLinks } from "@/lib/liveness";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -35,7 +36,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       if (byId.error || byLink.error) throw new Error((byId.error ?? byLink.error)!.message);
       for (const r of [...byId.data, ...byLink.data]) { existing.add(r.id); existing.add(r.link); }
     }
-    const fresh = rows.filter((r) => !existing.has(r.id) && !existing.has(r.link));
+    const unseen = rows.filter((r) => !existing.has(r.id) && !existing.has(r.link));
+    // VC boards keep listing postings the company already took down.
+    const live = await checkLinks(unseen.map((r) => r.link));
+    const fresh = unseen.filter((r) => live[r.link] !== "closed");
 
     let inserted = 0;
     if (fresh.length) {
@@ -48,7 +52,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       inserted = data?.length ?? 0;
     }
 
-    const result: RunResult = { found, inserted, skippedExisting: found - skippedByFilter - inserted, skippedByFilter };
+    const result: RunResult = { found, inserted, skippedExisting: found - skippedByFilter - unseen.length, skippedByFilter, skippedClosed: unseen.length - fresh.length };
     await finish({ last_found: found, last_inserted: inserted, last_error: null });
     return NextResponse.json(result);
   } catch (e) {

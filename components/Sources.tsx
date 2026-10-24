@@ -146,7 +146,7 @@ export default function Sources({ initial, onToast, onCollected }: Props) {
                   {a.last_run_at ? `Run ${ago(a.last_run_at)} · ${a.last_found ?? 0} found / ${a.last_inserted ?? 0} added` : "Never run"}
                 </div>
                 <div className={`${s.cell} ${a.last_error ? s.warnText : s.muted}`} title={a.last_error ?? ""}>
-                  {a.last_error ? `Error: ${a.last_error}` : r ? `${r.skippedByFilter} filtered, ${r.skippedExisting} already tracked` : ""}
+                  {a.last_error ? `Error: ${a.last_error}` : r ? `${r.skippedByFilter} filtered, ${r.skippedExisting} already tracked, ${r.skippedClosed} already closed` : ""}
                 </div>
                 <div className={s.rowAct}>
                   <button type="button" className={`${s.small} primary`} onClick={() => run(a)} disabled={busy || !a.enabled}>{busy ? "Running…" : "Run"}</button>

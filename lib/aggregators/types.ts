@@ -36,4 +36,4 @@ export type AggregatorRow = {
 
 export type Adapter = (a: Pick<AggregatorRow, "base_url" | "board_id" | "query">) => Promise<AggregatorJob[]>;
 
-export type RunResult = { found: number; inserted: number; skippedExisting: number; skippedByFilter: number };
+export type RunResult = { found: number; inserted: number; skippedExisting: number; skippedByFilter: number; skippedClosed: number };
