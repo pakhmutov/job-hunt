@@ -75,7 +75,7 @@ export function titleStage(p: Pick<Posting, "title">): Stage {
     if (OTHER_STACK_RE.test(t) && !STACK_RE.test(t)) return "title";
     stage = STACK_RE.test(t) ? "ok" : "stack";
   }
-  else if (GENERIC_RE.test(t) && !NOT_FRONTEND_RE.test(t)) stage = "react";
+  else if (GENERIC_RE.test(t) && !NOT_FRONTEND_RE.test(t) && !OTHER_STACK_RE.test(t)) stage = "react";
   else return "title";
   return LEVEL_RE.test(t) ? "level" : stage;
 }

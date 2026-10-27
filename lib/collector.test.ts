@@ -31,6 +31,7 @@ describe("titleStage", () => {
     expect(stage("Backend Engineer, UI Platform")).toBe("title");
     expect(stage("Senior Full-Stack Software Engineer (.NET, Angular)")).toBe("title");
     expect(stage("Senior Full Stack PHP Developer")).toBe("title");
+    expect(stage("Senior Software Engineer – C# / .NET")).toBe("title");
     expect(stage("Mechanical Design Engineer")).toBe("title");
     expect(stage("Software Engineer, Backend")).toBe("title");
     expect(stage("Senior Software Engineer, Machine Learning")).toBe("title");
