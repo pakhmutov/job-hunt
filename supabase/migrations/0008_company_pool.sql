@@ -1,6 +1,16 @@
 -- Company pool: thousands of boards imported in bulk or discovered from job links, swept daily by
 -- GitHub Actions (scripts/sweep.ts). The Vercel cron keeps checking only the hand-picked companies.
 
+-- 0. The sweep has its own token (GitHub secret SWEEP_TOKEN); its SHA-256 is private.settings.sweep_token_sha256.
+create or replace function private.check_token(p_token text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if p_token is null or encode(extensions.digest(p_token, 'sha256'), 'hex') not in
+     (select value from private.settings where key in ('collector_token_sha256', 'sweep_token_sha256')) then
+    raise exception 'invalid collector token' using errcode = '28000';
+  end if;
+end $$;
+
 -- 1. Where a company came from. 'manual' = Companies tab, 'dataset' = bulk import, 'discovered' = a job link.
 alter table public.companies
   add column origin text not null default 'manual' check (origin in ('manual','dataset','discovered'));
@@ -8,9 +18,9 @@ alter table public.companies
 -- 2. Funnel counter for "Software Engineer"-style titles dropped because the description has no React.
 alter table public.collect_runs add column dropped_stack int not null default 0;
 
--- 3. collector_companies: scope 'manual' (hand-picked only) or 'all'. Callers page through it with Range.
+-- 3. collector_companies: scope 'manual' (hand-picked only, the default) or 'all'. Callers page through it with Range.
 drop function public.collector_companies(text);
-create function public.collector_companies(p_token text, p_scope text default 'all')
+create function public.collector_companies(p_token text, p_scope text default 'manual')
 returns table (id bigint, name text, ats text, slug text, origin text, last_checked_at timestamptz)
 language plpgsql security definer set search_path = '' as $$
 begin

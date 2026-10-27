@@ -35,6 +35,6 @@ npm test                     # Vitest: id rule, job page parser, stage ages
 | `NEXT_PUBLIC_OWNER_EMAIL` | The only email allowed in |
 | `CRON_SECRET` | Shared secret for `/api/collect`; its SHA-256 lives in `private.settings` |
 
-The sweep workflow needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `CRON_SECRET` as GitHub Actions secrets.
+The sweep workflow needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SWEEP_TOKEN` (its own token; SHA-256 in `private.settings.sweep_token_sha256`) as GitHub Actions secrets.
 
 Database schema: `supabase/migrations/`.
