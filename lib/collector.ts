@@ -190,25 +190,25 @@ export function ashbyPosting(j: Json): Posting {
   };
 }
 
-export async function fetchPostings(c: Company): Promise<Posting[]> {
+export async function fetchPostings(c: Company, timeoutMs = 9000): Promise<Posting[]> {
   const slug = encodeURIComponent(c.slug);
   switch (c.ats) {
     case "greenhouse": {
       // Without ?content=true: a tenth of the size. Descriptions are fetched later, only for matches.
-      const data = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`)) as { jobs?: Json[] };
+      const data = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`, undefined, timeoutMs)) as { jobs?: Json[] };
       return (data.jobs ?? []).map((j) => greenhousePosting(j, c.slug));
     }
     case "lever":
     case "lever_eu": {
-      const data = (await getJSON(`https://${leverHost(c.ats)}/v0/postings/${slug}?mode=json`)) as Json[];
+      const data = (await getJSON(`https://${leverHost(c.ats)}/v0/postings/${slug}?mode=json`, undefined, timeoutMs)) as Json[];
       return (Array.isArray(data) ? data : []).map(leverPosting);
     }
     case "ashby": {
-      const data = (await getJSON(ashbyBoardUrl(c.slug))) as { jobs?: Json[] };
+      const data = (await getJSON(ashbyBoardUrl(c.slug), undefined, timeoutMs)) as { jobs?: Json[] };
       return (data.jobs ?? []).filter((j) => j.isListed !== false).map(ashbyPosting);
     }
     case "smartrecruiters": {
-      const data = (await getJSON(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&q=front`)) as { content?: Json[] };
+      const data = (await getJSON(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100&q=front`, undefined, timeoutMs)) as { content?: Json[] };
       return (data.content ?? []).map((j) => {
         const l = (j.location as Json | undefined) ?? {};
         const loc = [str(l.city), str(l.region), countryName(str(l.country))].filter(Boolean).join(", ") + (l.remote ? " (remote)" : "");
@@ -224,7 +224,7 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
       });
     }
     case "workable": {
-      const data = (await getJSON(`https://apply.workable.com/api/v1/widget/accounts/${slug}`)) as { jobs?: Json[] };
+      const data = (await getJSON(`https://apply.workable.com/api/v1/widget/accounts/${slug}`, undefined, timeoutMs)) as { jobs?: Json[] };
       return (data.jobs ?? []).map((j) => {
         const loc = [str(j.city), str(j.state), str(j.country)].filter(Boolean).join(", ");
         return {
@@ -246,7 +246,7 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
       // recruitee.com answers 429 past a few parallel requests from one IP.
       const data = (await recruiteeGate(async () => {
         for (let attempt = 1; ; attempt++) {
-          try { return await getJSON(`https://${slug}.recruitee.com/api/offers/`); } catch (e) {
+          try { return await getJSON(`https://${slug}.recruitee.com/api/offers/`, undefined, timeoutMs); } catch (e) {
             if (attempt >= 3 || !(e instanceof Error && e.message === "HTTP 429")) throw e;
             await new Promise((r) => setTimeout(r, 3000 * attempt));
           }
@@ -263,7 +263,7 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
       const base = `https://${host}.myworkdayjobs.com`;
       const out: Posting[] = [];
       for (let offset = 0; offset < 500; offset += 20) {
-        const data = (await getJSON(`${base}/wday/cxs/${tenant}/${site}/jobs`, { appliedFacets: {}, limit: 20, offset, searchText: "" })) as { total?: number; jobPostings?: Json[] };
+        const data = (await getJSON(`${base}/wday/cxs/${tenant}/${site}/jobs`, { appliedFacets: {}, limit: 20, offset, searchText: "" }, timeoutMs)) as { total?: number; jobPostings?: Json[] };
         const page = data.jobPostings ?? [];
         for (const j of page) {
           const loc = str(j.locationsText);
@@ -402,9 +402,9 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
   const reports: CompanyReport[] = [];
   const jobs: CollectedJob[] = [];
 
-  await pool(companies, concurrency, async (c) => {
+  const check = async (c: Company, timeoutMs: number, lastTry: boolean): Promise<boolean> => {
     try {
-      const postings = await fetchPostings(c);
+      const postings = await fetchPostings(c, timeoutMs);
       seen += postings.length;
       const cutoff = Math.max(now - maxAgeDays * 864e5, poolCutoff(c, now, firstCheckDays));
       let open = 0; // frontend-titled openings at my level, any age (shown on the Companies tab)
@@ -433,12 +433,20 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
         });
       }
       if (c.id > 0) reports.push({ id: c.id, status: "ok", open });
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (!lastTry && msg === "timeout") return false;
       errors.push({ company: `${c.name} (${c.ats}/${c.slug})`, error: msg });
       if (c.id > 0) reports.push({ id: c.id, status: msg.slice(0, 200), open: 0 });
+      return true;
     }
-  });
+  };
+
+  // Big boards (Lever sends megabytes) time out when 32 run at once; give those a second, slower pass.
+  const done = await pool(companies, concurrency, (c) => check(c, 9000, false));
+  const slow = companies.filter((_, i) => !done[i]);
+  await pool(slow, Math.min(concurrency, 6), (c) => check(c, 30000, true));
 
   return { jobs, reports, stats: { companies: companies.length, seen, ...funnel, matched: jobs.length, errors } };
 }
