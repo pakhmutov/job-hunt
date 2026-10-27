@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { ATS_HINT, parseBoardUrl, type CollectRun, type CompanyRow } from "@/lib/jobs";
+import { ATS_HINT, parseBoardUrl, type CollectRun, type CompanyRow, type PoolInfo } from "@/lib/jobs";
 import s from "./Dashboard.module.css";
 
 type Props = {
   initial: CompanyRow[];
   lastRun: CollectRun | null;
+  pool: PoolInfo;
   onToast: (msg: string) => void;
   onCollected: () => void;
 };
@@ -22,7 +23,7 @@ function ago(iso: string | null) {
   return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
 }
 
-export default function Companies({ initial, lastRun, onToast, onCollected }: Props) {
+export default function Companies({ initial, lastRun, pool, onToast, onCollected }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState(initial);
   const [run, setRun] = useState(lastRun);
@@ -70,8 +71,8 @@ export default function Companies({ initial, lastRun, onToast, onCollected }: Pr
       if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
       onToast(`Checked ${out.companies} companies · ${out.inserted} new jobs`);
       const [{ data: comp }, { data: runs }] = await Promise.all([
-        supabase.from("companies").select("*").order("name"),
-        supabase.from("collect_runs").select("*").order("started_at", { ascending: false }).limit(1),
+        supabase.from("companies").select("*").eq("origin", "manual").order("name"),
+        supabase.from("collect_runs").select("*").neq("trigger", "sweep").order("started_at", { ascending: false }).limit(1),
       ]);
       if (comp) setRows(comp as CompanyRow[]);
       if (runs?.[0]) setRun(runs[0] as CollectRun);
@@ -101,6 +102,14 @@ export default function Companies({ initial, lastRun, onToast, onCollected }: Pr
           {run && run.title_matched > 0 && (
             <div className={s.muted}>
               {run.title_matched} frontend by title → dropped {run.dropped_level} by level, {run.dropped_age} as older than 14 days, {run.dropped_location} by location.
+            </div>
+          )}
+          {pool.size > 0 && (
+            <div className={s.muted}>
+              Pool: {pool.size.toLocaleString("en-US")} more boards (imported or seen in job links), swept daily by GitHub Actions.
+              {pool.lastSweep
+                ? ` Last sweep ${ago(pool.lastSweep.started_at)}: ${pool.lastSweep.postings_seen.toLocaleString("en-US")} openings, ${pool.lastSweep.matched} matched, ${pool.lastSweep.inserted} new.`
+                : " Not swept yet."}
             </div>
           )}
           {broken > 0 && <div className={s.warnText}>{broken} boards failed on the last check. They&apos;re marked below.</div>}

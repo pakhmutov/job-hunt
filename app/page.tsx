@@ -22,13 +22,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
   }
 
   const { add } = await searchParams;
-  const [{ data, error }, { data: companies }, { data: runs }, { data: aggregators }, { data: events }] = await Promise.all([
+  const [{ data, error }, { data: companies }, { data: runs }, { data: aggregators }, { data: events }, { count: poolSize }, { data: sweeps }] = await Promise.all([
     supabase.from("jobs").select("*").order("found_on", { ascending: false }).limit(2000),
-    supabase.from("companies").select("*").order("name"),
-    supabase.from("collect_runs").select("*").order("started_at", { ascending: false }).limit(1),
+    // The imported pool runs to thousands of boards; the tab lists only the hand-picked ones.
+    supabase.from("companies").select("*").eq("origin", "manual").order("name"),
+    supabase.from("collect_runs").select("*").neq("trigger", "sweep").order("started_at", { ascending: false }).limit(1),
     supabase.from("aggregators").select("*").order("name"),
     // Real status changes into a reply stage, for "average days until the first reply".
     supabase.from("job_events").select("job_id, to_status, at").not("from_status", "is", null).in("to_status", [...REPLIED]).limit(5000),
+    supabase.from("companies").select("id", { count: "exact", head: true }).neq("origin", "manual").eq("active", true),
+    supabase.from("collect_runs").select("*").eq("trigger", "sweep").order("started_at", { ascending: false }).limit(1),
   ]);
   return (
     <Dashboard
@@ -36,6 +39,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
       loadError={error?.message ?? null}
       companies={(companies ?? []) as CompanyRow[]}
       lastRun={(runs?.[0] as CollectRun | undefined) ?? null}
+      pool={{ size: poolSize ?? 0, lastSweep: (sweeps?.[0] as CollectRun | undefined) ?? null }}
       aggregators={(aggregators ?? []) as AggregatorRow[]}
       replyEvents={(events ?? []) as ReplyEvent[]}
       addUrl={typeof add === "string" ? add : Array.isArray(add) ? add[0] ?? "" : null}

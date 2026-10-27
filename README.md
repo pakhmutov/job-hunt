@@ -2,7 +2,7 @@
 
 Personal tracker for frontend job applications.
 
-**How jobs arrive:** a Vercel Cron job calls `/api/collect` every morning. It polls the public job-board APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Workday) of the companies on the *Companies* tab, keeps frontend/React roles from the last 14 days (dropping only senior-management titles, explicit onsite outside the US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC) and stores them as `New`. A scheduled Claude task then reads each description, scores it against my CV, and moves it to `Kept` (with draft answers) or `Skipped`.
+**How jobs arrive:** a Vercel Cron job calls `/api/collect` every morning for the hand-picked companies, and a GitHub Actions workflow (`npm run sweep`, 04:15 UTC) sweeps the whole pool: ~15k Greenhouse / Lever / Ashby boards imported with `npm run import-companies -- companies.csv` (from [pa-nuzz/company-dataset-](https://github.com/pa-nuzz/company-dataset-)) plus every board that shows up in a job link. Pool companies only add postings newer than their last check. Both poll the public job-board APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Workday), keep frontend/React roles (plus full-stack and generic "Software / Product / Design Engineer" titles whose description mentions React) from the last 14 days (dropping only senior-management titles, explicit onsite outside the US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC) and store them as `New`. A scheduled Claude task then reads each description, scores it against my CV, and moves it to `Kept` (with draft answers) or `Skipped`.
 
 **Stack:** Next.js 15 (App Router) · TypeScript · Supabase (Postgres, Auth, Realtime) · CSS Modules · Vercel
 
@@ -34,5 +34,7 @@ npm test                     # Vitest: id rule, job page parser, stage ages
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable (anon) key |
 | `NEXT_PUBLIC_OWNER_EMAIL` | The only email allowed in |
 | `CRON_SECRET` | Shared secret for `/api/collect`; its SHA-256 lives in `private.settings` |
+
+The sweep workflow needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `CRON_SECRET` as GitHub Actions secrets.
 
 Database schema: `supabase/migrations/`.

@@ -22,9 +22,9 @@ const LEVEL_RE = /\b(staff|principal|lead|manager|director|head)\b/i;
  */
 export function passesFilters(j: AggregatorJob): boolean {
   if (!j.open || !j.link) return false;
-  const stage = titleStage({ title: j.title, description: "" });
+  const stage = titleStage({ title: j.title });
   if (stage === "level" || LEVEL_RE.test(j.title)) return false;
-  return stage === "ok" || j.tags.some((t) => FRONTEND_TAGS.has(t));
+  return stage === "ok" || stage === "stack" || j.tags.some((t) => FRONTEND_TAGS.has(t));
 }
 
 export type AggregatorInsert = {

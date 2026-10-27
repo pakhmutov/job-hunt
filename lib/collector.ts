@@ -7,7 +7,8 @@ import { jobId } from "./jobs";
  */
 
 export type Ats = "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday";
-export type Company = { id: number; name: string; ats: Ats; slug: string };
+/** origin: 'manual' = added by hand, 'dataset' = bulk import, 'discovered' = seen in a job link. */
+export type Company = { id: number; name: string; ats: Ats; slug: string; origin?: string; last_checked_at?: string | null };
 
 export type Posting = {
   externalId: string;
@@ -34,10 +35,21 @@ export type CollectedJob = {
 export type CompanyReport = { id: number; status: string; open: number };
 
 // The collector only pre-filters with a wide margin; Claude makes the real call when scoring.
-const TITLE_RE = /\b(front[\s-]?end|react(\.?js)?|ui (engineer|developer)|web (engineer|developer)|(javascript|typescript) (engineer|developer)|software engineer[,\s-]+(web|ui))\b/i;
+const TITLE_RE = /\b(front[\s-]?end|react(\.?js)?|ui (engineer|developer)|web (engineer|developer)|(javascript|typescript) (engineer|developer)|software engineer[,\s-]+(web|ui)|(ui|web) platform|web applications?)\b/i;
 const FULLSTACK_RE = /\bfull[\s-]?stack\b/i;
+// Full-stack titles that name a non-JS backend or a framework I don't do.
+const OTHER_STACK_RE = /(\.net\b|\bc#|\b(php|ruby|rails|java|python|golang|angular|ios|android)\b)/i;
+const BACKEND_TITLE_RE = /^\W*((senior|sr\.?)\s+)?back[\s-]?end\b/i;
 const STACK_RE = /\b(react|typescript|next\.?js)\b/i;
 const LEVEL_RE = /\b(staff|principal|lead|manager|director|head)\b/i;
+// "Software Engineer" and the like: kept only when the description mentions React.
+const GENERIC_RE = /\b(software|application|product|design) (engineer|developer)\b|\bsoftware development engineer\b|\bsde\b|^\s*(senior |sr\.? |mid[\s-]level )?(engineer|developer)\b/i;
+const NOT_FRONTEND_RE =
+  /\b(back[\s-]?end|data|ml|machine learning|ai research|research|infra(structure)?|sre|site reliability|devops|security|ios|android|mobile|embedded|firmware|hardware|qa|quality|test|sdet|network(ing)?|kernel|compiler|distributed systems|database|storage|java|golang|go|rust|c\+\+|python|scala|kotlin|ruby|php|\.net|c#|salesforce|sap|solutions?|support|sales|field|forward deployed|implementation|mechanical|electrical|transportation|civil|structural|propulsion|landing gear|mmic|rf|analog|asic|silicon|chip|optical|thermal|process|manufacturing|construction)\b/i;
+const REACT_RE = /\b(react(\.?js)?|next\.?js)\b/i;
+
+/** "stack" / "react": the title alone isn't enough, the description has to mention the stack. */
+export type Stage = "title" | "level" | "ok" | "stack" | "react";
 
 // Places where an onsite/hybrid role is still worth a look: US, UK, Ireland, EU (+ Serbia, home).
 const EUROPE_RE =
@@ -50,17 +62,29 @@ const REMOTE_LIMITED_RE =
   /\b(united states|usa|us|u\.s\.|north america|americas|canada|toronto|vancouver|montreal|ottawa|latam|latin america|south america|brazil|mexico|argentina|colombia|chile|apac|asia|asia pacific|india|australia|new zealand|singapore|japan|philippines)\b/i;
 // Onsite/hybrid outside the US/UK/IE/EU. Anything not recognised here counts as unclear and passes.
 const OUTSIDE_RE =
-  /\b(canada|toronto|vancouver|montreal|ottawa|latam|brazil|são paulo|sao paulo|mexico|argentina|buenos aires|colombia|bogota|chile|santiago|india|bangalore|bengaluru|hyderabad|pune|delhi|gurgaon|gurugram|noida|mumbai|chennai|china|shanghai|beijing|shenzhen|hong kong|taiwan|taipei|korea|seoul|japan|tokyo|singapore|australia|sydney|melbourne|new zealand|auckland|philippines|manila|vietnam|indonesia|jakarta|malaysia|kuala lumpur|thailand|bangkok|israel|tel aviv|uae|dubai|abu dhabi|saudi|riyadh|qatar|doha|turkey|türkiye|istanbul|azerbaijan|baku|armenia|yerevan|tbilisi|kazakhstan|almaty|astana|russia|moscow|ukraine|kyiv|kiev|belarus|minsk|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|cape town|johannesburg|pakistan)\b/i;
+  /\b(canada|toronto|vancouver|montreal|ottawa|latam|brazil|são paulo|sao paulo|mexico|argentina|buenos aires|colombia|bogota|chile|santiago|india|bangalore|bengaluru|hyderabad|pune|delhi|gurgaon|gurugram|noida|mumbai|chennai|china|shanghai|beijing|shenzhen|hong kong|taiwan|taipei|korea|seoul|japan|tokyo|singapore|australia|sydney|melbourne|new zealand|auckland|philippines|manila|vietnam|indonesia|jakarta|malaysia|kuala lumpur|thailand|bangkok|israel|tel aviv|uae|dubai|abu dhabi|saudi|riyadh|qatar|doha|turkey|türkiye|istanbul|azerbaijan|baku|armenia|yerevan|tbilisi|kazakhstan|almaty|astana|russia|moscow|ukraine|kyiv|kiev|belarus|minsk|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|cape town|johannesburg|pakistan|peru|lima|uruguay|montevideo|costa rica|guatemala|ecuador|quito|venezuela|quebec|québec)\b/i;
 const EXCLUDE_ONLY_RE = /\b(us only|usa only|u\.s\. only|canada only|latam only|india only|must reside in the (us|united states)|apac only)\b/i;
 
-export type Stage = "title" | "level" | "ok";
-
 /** Title stage: is it a frontend role at all, and is it above the level I'm after? */
-export function titleStage(p: Pick<Posting, "title" | "description">): Stage {
+export function titleStage(p: Pick<Posting, "title">): Stage {
   const t = p.title;
-  const fullstack = FULLSTACK_RE.test(t) && (STACK_RE.test(t) || !p.description || STACK_RE.test(p.description));
-  if (!TITLE_RE.test(t) && !fullstack) return "title";
-  return LEVEL_RE.test(t) ? "level" : "ok";
+  let stage: Stage;
+  if (BACKEND_TITLE_RE.test(t)) return "title";
+  if (TITLE_RE.test(t)) stage = "ok";
+  else if (FULLSTACK_RE.test(t)) {
+    if (OTHER_STACK_RE.test(t) && !STACK_RE.test(t)) return "title";
+    stage = STACK_RE.test(t) ? "ok" : "stack";
+  }
+  else if (GENERIC_RE.test(t) && !NOT_FRONTEND_RE.test(t)) stage = "react";
+  else return "title";
+  return LEVEL_RE.test(t) ? "level" : stage;
+}
+
+/** For "stack" / "react" titles: does the description back it up? */
+export function stackConfirmed(stage: Stage, description: string): boolean {
+  if (stage === "stack") return STACK_RE.test(description);
+  if (stage === "react") return REACT_RE.test(description);
+  return true;
 }
 
 /** Rough location gate: drops only explicit onsite outside US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC. */
@@ -162,7 +186,8 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
   const slug = encodeURIComponent(c.slug);
   switch (c.ats) {
     case "greenhouse": {
-      const data = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`)) as { jobs?: Json[] };
+      // Without ?content=true: a tenth of the size. Descriptions are fetched later, only for matches.
+      const data = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`)) as { jobs?: Json[] };
       return (data.jobs ?? []).map((j) => greenhousePosting(j, c.slug));
     }
     case "lever":
@@ -233,6 +258,13 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
   }
 }
 
+/** Description for boards whose list doesn't carry it. "" when there's no cheap way to get it. */
+export async function fetchDescription(c: Company, p: Posting): Promise<string> {
+  if (c.ats !== "greenhouse") return "";
+  const j = (await getJSON(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(c.slug)}/jobs/${p.externalId}`)) as Json;
+  return htmlToText(str(j.content));
+}
+
 /** SmartRecruiters gives ISO codes ("in", "de"); the location regexes need names. */
 export function countryName(code: string): string {
   if (!/^[a-z]{2}$/i.test(code)) return code;
@@ -245,7 +277,7 @@ function workdayPosted(text: string): string | null {
   return Number.isFinite(days) ? new Date(Date.now() - days * 864e5).toISOString() : null;
 }
 
-async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
@@ -254,29 +286,50 @@ async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): P
   return out;
 }
 
-export async function collect(companies: Company[], maxAgeDays: number) {
-  const cutoff = Date.now() - maxAgeDays * 864e5;
+/** Earliest publish time worth inserting for a pool company; -Infinity for companies added by hand. */
+export function poolCutoff(c: Pick<Company, "origin" | "last_checked_at">, now: number, firstCheckDays: number): number {
+  if (!c.origin || c.origin === "manual") return -Infinity;
+  const last = c.last_checked_at ? Date.parse(c.last_checked_at) : NaN;
+  return Number.isFinite(last) ? last - 2 * 864e5 : now - firstCheckDays * 864e5;
+}
+
+export type CollectOptions = {
+  /**
+   * Imported / discovered companies only get postings newer than their last check (minus a margin for
+   * late timestamps), and this many days on the first one, so the pool never floods New with old jobs.
+   */
+  firstCheckDays?: number;
+  concurrency?: number;
+};
+
+export async function collect(companies: Company[], maxAgeDays: number, opts: CollectOptions = {}) {
+  const { firstCheckDays = 3, concurrency = 8 } = opts;
+  const now = Date.now();
   let seen = 0;
   // Funnel, so a run that matches nothing shows which stage ate everything.
-  const funnel = { title_matched: 0, dropped_level: 0, dropped_age: 0, dropped_location: 0 };
+  const funnel = { title_matched: 0, dropped_level: 0, dropped_age: 0, dropped_location: 0, dropped_stack: 0 };
   const errors: { company: string; error: string }[] = [];
   const reports: CompanyReport[] = [];
   const jobs: CollectedJob[] = [];
 
-  await pool(companies, 8, async (c) => {
+  await pool(companies, concurrency, async (c) => {
     try {
       const postings = await fetchPostings(c);
       seen += postings.length;
-      const fe = postings.filter((p) => titleStage(p) !== "title");
-      const fit = fe.filter((p) => titleStage(p) === "ok");
-      funnel.title_matched += fe.length;
-      funnel.dropped_level += fe.length - fit.length;
-      reports.push({ id: c.id, status: "ok", open: fit.length });
-      for (const p of fit) {
+      const cutoff = Math.max(now - maxAgeDays * 864e5, poolCutoff(c, now, firstCheckDays));
+      let open = 0; // frontend-titled openings at my level, any age (shown on the Companies tab)
+      for (const p of postings) {
+        const stage = titleStage(p);
+        if (stage === "title") continue;
+        funnel.title_matched++;
+        if (stage === "level") { funnel.dropped_level++; continue; }
+        if (stage !== "react") open++;
         const ts = p.publishedAt ? Date.parse(p.publishedAt) : NaN;
         if (Number.isFinite(ts) && ts < cutoff) { funnel.dropped_age++; continue; }
-        if (!locationPlausible(p)) { funnel.dropped_location++; continue; }
         if (!p.link) continue;
+        if (!p.description) p.description = await fetchDescription(c, p).catch(() => "");
+        if (!locationPlausible(p)) { funnel.dropped_location++; continue; }
+        if (!stackConfirmed(stage, p.description)) { funnel.dropped_stack++; continue; }
         jobs.push({
           id: jobId(p.link),
           link: p.link,
@@ -289,6 +342,7 @@ export async function collect(companies: Company[], maxAgeDays: number) {
           description: p.description.slice(0, 12000),
         });
       }
+      reports.push({ id: c.id, status: "ok", open });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push({ company: `${c.name} (${c.ats}/${c.slug})`, error: msg });

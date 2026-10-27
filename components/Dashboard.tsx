@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   CLOSED, PROGRESS, SENT, SOURCES, STATUSES, TONE, TRACKED, VIEWS, WAITING,
   ageLevel, applicationStats, csvToJobs, jobId, jobsToCSV, stageAge, todayISO,
-  type CollectRun, type CompanyRow, type Job, type ReplyEvent, type SourceKey, type Status, type ViewKey,
+  type CollectRun, type CompanyRow, type PoolInfo, type Job, type ReplyEvent, type SourceKey, type Status, type ViewKey,
 } from "@/lib/jobs";
 import { lookupJobAction, saveApplication, type ApplicationInput } from "@/app/actions";
 import Companies from "./Companies";
@@ -18,13 +18,14 @@ type Props = {
   loadError: string | null;
   companies: CompanyRow[];
   lastRun: CollectRun | null;
+  pool: PoolInfo;
   aggregators: AggregatorRow[];
   replyEvents: ReplyEvent[];
   /** from /add?url=…: open the "+ Applied" form with this link (null = don't open) */
   addUrl: string | null;
 };
 
-export default function Dashboard({ initialJobs, loadError, companies, lastRun, aggregators, replyEvents, addUrl }: Props) {
+export default function Dashboard({ initialJobs, loadError, companies, lastRun, pool, aggregators, replyEvents, addUrl }: Props) {
   const [page, setPage] = useState<"jobs" | "companies" | "sources">("jobs");
   const supabase = useMemo(() => createClient(), []);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
@@ -204,7 +205,7 @@ export default function Dashboard({ initialJobs, loadError, companies, lastRun, 
       {loadError && <p className={s.error}>Couldn&apos;t load your jobs: {loadError}</p>}
 
       {page === "companies" ? (
-        <Companies initial={companies} lastRun={lastRun} onToast={setToast} onCollected={reload} />
+        <Companies initial={companies} lastRun={lastRun} pool={pool} onToast={setToast} onCollected={reload} />
       ) : page === "sources" ? (
         <Sources initial={aggregators} onToast={setToast} onCollected={reload} />
       ) : (<>

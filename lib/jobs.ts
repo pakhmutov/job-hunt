@@ -291,7 +291,11 @@ export type CompanyRow = {
   last_checked_at: string | null;
   last_status: string | null;
   last_open_jobs: number | null;
+  origin: "manual" | "dataset" | "discovered";
 };
+
+/** The imported / discovered boards swept by GitHub Actions. */
+export type PoolInfo = { size: number; lastSweep: CollectRun | null };
 
 export type CollectRun = {
   id: number;
@@ -303,6 +307,7 @@ export type CollectRun = {
   dropped_level: number;
   dropped_age: number;
   dropped_location: number;
+  dropped_stack?: number;
   matched: number;
   inserted: number;
   errors: { company: string; error: string }[];

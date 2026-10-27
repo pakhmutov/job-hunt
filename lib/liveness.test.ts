@@ -1,11 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkLinks, parseLiveRef } from "./liveness";
+import { checkLinks, pageLiveness, parseLiveRef } from "./liveness";
+
+describe("pageLiveness", () => {
+  it("reads status, redirects, JSON-LD and gone notices", () => {
+    expect(pageLiveness(404, "https://x.io/job/1", "")).toBe("closed");
+    expect(pageLiveness(200, "https://job-boards.greenhouse.io/acme?error=true", "")).toBe("closed");
+    const ld = (extra: string) => `<script type="application/ld+json">{"@type":"JobPosting","title":"FE"${extra}}</script>`;
+    expect(pageLiveness(200, "https://x.io/job/1", ld(""))).toBe("open");
+    expect(pageLiveness(200, "https://x.io/job/1", ld(',"validThrough":"2020-01-01"'))).toBe("closed");
+    expect(pageLiveness(200, "https://x.io/job/1", "<h1>Sorry, this job is no longer available</h1>")).toBe("closed");
+    expect(pageLiveness(200, "https://x.io/job/1", "<h1>Careers</h1>")).toBe("unknown");
+  });
+});
 
 describe("parseLiveRef", () => {
   it("reads ATS links", () => {
     expect(parseLiveRef("https://apply.workable.com/prox-works/j/BBC649A3A1")).toEqual({ ats: "workable", slug: "prox-works", jobId: "BBC649A3A1" });
     expect(parseLiveRef("https://job-boards.greenhouse.io/doitintl/jobs/7510555003")?.ats).toBe("greenhouse");
     expect(parseLiveRef("https://example.com/careers/1")).toBeNull();
+    expect(parseLiveRef("https://jobs.smartrecruiters.com/DeliveryHero/744000158119080-frontend")).toEqual({ ats: "smartrecruiters", slug: "DeliveryHero", jobId: "744000158119080" });
+    expect(parseLiveRef("https://postman.wd108.myworkdayjobs.com/careers/job/Bangalore-India/FE_JR1")).toEqual({
+      ats: "workday", base: "https://postman.wd108.myworkdayjobs.com", tenant: "postman", site: "careers", path: "/job/Bangalore-India/FE_JR1",
+    });
   });
 });
 
