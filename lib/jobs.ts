@@ -284,7 +284,7 @@ export function jobsToCSV(jobs: Job[]): string {
 export type CompanyRow = {
   id: number;
   name: string;
-  ats: "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday";
+  ats: "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday" | "personio" | "recruitee";
   slug: string;
   active: boolean;
   notes: string | null;
@@ -321,6 +321,8 @@ export const ATS_HINT: Record<CompanyRow["ats"], string> = {
   smartrecruiters: "jobs.smartrecruiters.com/<slug>",
   workable: "apply.workable.com/<slug>",
   workday: "<tenant>.wd1/<site>",
+  personio: "<slug>.jobs.personio.de",
+  recruitee: "<slug>.recruitee.com",
 };
 
 /** Paste a careers link, get the ATS and slug back. */
@@ -333,6 +335,8 @@ export function parseBoardUrl(url: string): { ats: CompanyRow["ats"]; slug: stri
     [/^jobs\.ashbyhq\.com\/([^/?#]+)/i, "ashby"],
     [/^(?:jobs|careers)\.smartrecruiters\.com\/([^/?#]+)/i, "smartrecruiters"],
     [/^apply\.workable\.com\/([^/?#]+)/i, "workable"],
+    [/^([a-z0-9-]+)\.jobs\.personio\.(?:de|com)\b/i, "personio"],
+    [/^([a-z0-9-]+)\.recruitee\.com\b/i, "recruitee"],
   ];
   for (const [re, ats] of rules) { const m = u.match(re); if (m) return { ats, slug: decodeURIComponent(m[1]) }; }
   const wd = u.match(/^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/i);

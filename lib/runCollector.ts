@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { collect, type CollectOptions, type Company } from "./collector";
+import { feedCompanies } from "./feeds";
 
 export type Scope = "manual" | "all";
 
@@ -28,7 +29,7 @@ async function loadCompanies(supabase: ReturnType<typeof client>, scope: Scope):
 
 /**
  * Runs one collection pass and stores the results through the token-checked RPCs.
- * Vercel (cron and "Check now") runs the hand-picked companies; the GitHub Actions sweep runs the whole pool.
+ * Vercel (cron and "Check now") runs the hand-picked companies; the GitHub Actions sweep runs the whole pool and the feeds.
  */
 export async function runCollector(trigger: "cron" | "manual" | "sweep", maxAgeDays = 14, scope: Scope = "manual", opts?: CollectOptions) {
   const supabase = client();
@@ -37,6 +38,7 @@ export async function runCollector(trigger: "cron" | "manual" | "sweep", maxAgeD
     if (error) throw new Error(`Couldn't discover companies: ${error.message}`);
   }
   const companies = await loadCompanies(supabase, scope);
+  if (scope === "all") companies.push(...feedCompanies());
 
   const { jobs, reports, stats } = await collect(companies, maxAgeDays, opts);
   // A few thousand dead boards would bloat the run log; the per-company status keeps every error anyway.

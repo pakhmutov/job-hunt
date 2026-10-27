@@ -1,7 +1,8 @@
 /**
  * One-off: load a companies CSV into the pool as origin = 'dataset'.
  *   npm run import-companies -- path/to/companies.csv
- * Expects the github.com/pa-nuzz/company-dataset- columns: name, ats_system, ats_code.
+ * Expects the github.com/pa-nuzz/company-dataset- columns: name, ats_system, ats_code
+ * (also used for the Personio / Recruitee list built from Common Crawl subdomains).
  * Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and CRON_SECRET.
  */
 import { readFileSync } from "node:fs";
@@ -16,7 +17,7 @@ async function main() {
   const [name, ats, slug] = [col("name"), col("ats_system"), col("ats_code")];
   const list = rows
     .map((r) => ({ name: r[name]?.trim() || r[slug], ats: r[ats]?.trim(), slug: r[slug]?.trim() }))
-    .filter((r) => ["greenhouse", "lever", "ashby"].includes(r.ats) && /^[A-Za-z0-9._-]+$/.test(r.slug));
+    .filter((r) => ["greenhouse", "lever", "ashby", "personio", "recruitee"].includes(r.ats) && /^[A-Za-z0-9._-]+$/.test(r.slug));
 
   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, { auth: { persistSession: false } });
   let added = 0;

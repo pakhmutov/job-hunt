@@ -1,3 +1,4 @@
+import { fetchFeed } from "./feeds";
 import { jobId } from "./jobs";
 
 /**
@@ -6,8 +7,11 @@ import { jobId } from "./jobs";
  * Claude's morning task then scores them (status 'New' → 'Kept' / 'Skipped').
  */
 
-export type Ats = "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday";
-/** origin: 'manual' = added by hand, 'dataset' = bulk import, 'discovered' = seen in a job link. */
+export type Ats = "greenhouse" | "lever" | "lever_eu" | "ashby" | "smartrecruiters" | "workable" | "workday" | "personio" | "recruitee" | "feed";
+/**
+ * origin: 'manual' = added by hand, 'dataset' = bulk import, 'discovered' = seen in a job link,
+ * 'feed' = a job board from ./feeds (id 0, not a companies row).
+ */
 export type Company = { id: number; name: string; ats: Ats; slug: string; origin?: string; last_checked_at?: string | null };
 
 export type Posting = {
@@ -18,13 +22,17 @@ export type Posting = {
   remote: boolean;
   publishedAt: string | null; // ISO
   description: string;
+  /** Feeds: the hiring company (otherwise the watched company's name is used). */
+  company?: string;
+  /** Feeds whose "title" isn't a job title (HN) decide the stage themselves. */
+  stage?: Stage;
 };
 
 export type CollectedJob = {
   id: string;
   link: string;
   company: string;
-  company_id: number;
+  company_id: number | null;
   title: string;
   location_raw: string;
   published_at: string | null;
@@ -230,8 +238,26 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
         };
       });
     }
+    case "personio": {
+      const xml = await getXML(`https://${c.slug}.jobs.personio.de/xml?language=en`);
+      return parsePersonio(xml, c.slug);
+    }
+    case "recruitee": {
+      // recruitee.com answers 429 past a few parallel requests from one IP.
+      const data = (await recruiteeGate(async () => {
+        for (let attempt = 1; ; attempt++) {
+          try { return await getJSON(`https://${slug}.recruitee.com/api/offers/`); } catch (e) {
+            if (attempt >= 3 || !(e instanceof Error && e.message === "HTTP 429")) throw e;
+            await new Promise((r) => setTimeout(r, 3000 * attempt));
+          }
+        }
+      })) as { offers?: Json[] };
+      return (data.offers ?? []).filter((j) => str(j.status || "published") === "published").map(recruiteePosting);
+    }
+    case "feed":
+      return fetchFeed(c.slug);
     case "workday": {
-      // slug = "<tenant>.<wdN>/<site>", e.g. "postman.wd108/careers"
+      // slug ="<tenant>.<wdN>/<site>", e.g. "postman.wd108/careers"
       const [host, site] = c.slug.split("/");
       const tenant = host.split(".")[0];
       const base = `https://${host}.myworkdayjobs.com`;
@@ -257,6 +283,70 @@ export async function fetchPostings(c: Company): Promise<Posting[]> {
     }
   }
 }
+
+async function getXML(url: string, timeoutMs = 9000): Promise<string> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    cache: "no-store",
+    redirect: "manual",
+    headers: { accept: "application/xml", "user-agent": "job-hunt-collector/1.0" },
+  });
+  // Personio answers a dead board with a redirect or an HTML "Page Not Found".
+  if (res.status === 404 || (res.status >= 300 && res.status < 400)) throw new Error("board not found (check slug)");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  if (!text.includes("<workzag-jobs")) throw new Error("board not found (check slug)");
+  return text;
+}
+
+const xmlTag = (xml: string, name: string) => xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1] ?? "";
+const cdata = (s: string) => decode(s.replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, "").trim());
+
+/** Personio's public XML feed: {slug}.jobs.personio.de/xml. */
+export function parsePersonio(xml: string, slug: string): Posting[] {
+  return [...xml.matchAll(/<position>([\s\S]*?)<\/position>/g)].map(([, p]) => {
+    const id = cdata(xmlTag(p, "id"));
+    const offices = [cdata(xmlTag(p, "office")), ...[...xmlTag(p, "additionalOffices").matchAll(/<office>([\s\S]*?)<\/office>/g)].map((m) => cdata(m[1]))].filter(Boolean);
+    const loc = [...new Set(offices)].join("; ");
+    const desc = [...p.matchAll(/<jobDescription>([\s\S]*?)<\/jobDescription>/g)]
+      .map(([, d]) => `${cdata(xmlTag(d, "name"))}\n${htmlToText(cdata(xmlTag(d, "value")))}`).join("\n\n");
+    return {
+      externalId: id,
+      title: cdata(xmlTag(p, "name")),
+      link: `https://${slug}.jobs.personio.de/job/${id}`,
+      location: loc,
+      remote: /remote/i.test(loc),
+      publishedAt: cdata(xmlTag(p, "createdAt")) || null,
+      description: desc.trim(),
+    };
+  });
+}
+
+export function recruiteePosting(j: Json): Posting {
+  const loc = str(j.location) || [str(j.city), str(j.country)].filter(Boolean).join(", ");
+  const remote = j.remote === true;
+  return {
+    externalId: str(j.id),
+    title: str(j.title),
+    link: str(j.careers_url),
+    location: remote && !/remote/i.test(loc) ? `${loc}${loc ? " " : ""}(remote)` : loc,
+    remote,
+    // "2026-10-07 12:20:15 UTC"
+    publishedAt: str(j.published_at).replace(/^(\S+) (\S+) UTC$/, "$1T$2Z") || null,
+    description: [htmlToText(str(j.description)), htmlToText(str(j.requirements))].filter(Boolean).join("\n\n"),
+  };
+}
+
+/** At most 3 Recruitee requests in flight, whatever the pool's concurrency. */
+const recruiteeGate = (() => {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= 3) await new Promise<void>((r) => queue.push(r));
+    active++;
+    try { return await fn(); } finally { active--; queue.shift()?.(); }
+  };
+})();
 
 /** Description for boards whose list doesn't carry it. "" when there's no cheap way to get it. */
 export async function fetchDescription(c: Company, p: Posting): Promise<string> {
@@ -319,7 +409,7 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
       const cutoff = Math.max(now - maxAgeDays * 864e5, poolCutoff(c, now, firstCheckDays));
       let open = 0; // frontend-titled openings at my level, any age (shown on the Companies tab)
       for (const p of postings) {
-        const stage = titleStage(p);
+        const stage = p.stage ?? titleStage(p);
         if (stage === "title") continue;
         funnel.title_matched++;
         if (stage === "level") { funnel.dropped_level++; continue; }
@@ -333,8 +423,8 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
         jobs.push({
           id: jobId(p.link),
           link: p.link,
-          company: c.name,
-          company_id: c.id,
+          company: p.company || c.name,
+          company_id: c.id > 0 ? c.id : null,
           title: p.title,
           location_raw: p.location,
           published_at: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
@@ -342,11 +432,11 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
           description: p.description.slice(0, 12000),
         });
       }
-      reports.push({ id: c.id, status: "ok", open });
+      if (c.id > 0) reports.push({ id: c.id, status: "ok", open });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push({ company: `${c.name} (${c.ats}/${c.slug})`, error: msg });
-      reports.push({ id: c.id, status: msg.slice(0, 200), open: 0 });
+      if (c.id > 0) reports.push({ id: c.id, status: msg.slice(0, 200), open: 0 });
     }
   });
 
