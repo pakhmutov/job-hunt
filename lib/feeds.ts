@@ -102,8 +102,9 @@ async function arbeitnow(): Promise<Posting[]> {
         externalId: str(j.slug),
         title: str(j.title),
         company: str(j.company_name),
-        // The same posting comes back under arbeitnow.fr / .nl / .co.uk …; one host keeps one id.
-        link: str(j.url).replace(/^https:\/\/www\.arbeitnow\.[a-z.]+\//, "https://www.arbeitnow.com/"),
+        // Keep the country host (.fr / .nl / .co.uk …): arbeitnow.com answers 410 for postings listed elsewhere.
+        // resolveFeedLink() swaps it for the employer's ATS link, which also dedupes across hosts.
+        link: str(j.url),
         location: [str(j.location), j.remote ? "Remote" : ""].filter(Boolean).join(", ") || "Germany",
         remote: j.remote === true,
         publishedAt: iso(j.created_at),
@@ -172,9 +173,16 @@ async function hn(): Promise<Posting[]> {
 
 const FETCHERS: Record<Feed, () => Promise<Posting[]>> = { remoteok, himalayas, jobicy, arbeitnow, weworkremotely, hn };
 
-/** An ATS link without tracking params and the "apply" step: the posting page itself. */
+const TRACKING_PARAM_RE = /^(utm_\w+|ref|source|pid|gh_src|lever-source|src)$/i;
+
+/** An ATS link without tracking params and the "apply" step: the posting page itself. Other params (gh_jid=…) stay. */
 export function cleanAtsLink(url: string): string {
-  return url.replace(/[?#].*$/, "").replace(/\/(application|apply)\/?$/, "");
+  let u: URL;
+  try { u = new URL(url); } catch { return url; }
+  for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM_RE.test(k)) u.searchParams.delete(k);
+  u.hash = "";
+  u.pathname = u.pathname.replace(/\/(application|apply)\/?$/, "");
+  return u.toString();
 }
 
 /**
@@ -183,8 +191,8 @@ export function cleanAtsLink(url: string): string {
  */
 export async function resolveFeedLink(slug: string, link: string): Promise<string> {
   if (slug !== "arbeitnow") return link;
-  // One retry: the first request of a run sometimes times out.
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // Retries: the first request of a run sometimes times out, and a burst of requests gets 429.
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(`${link.replace(/\/$/, "")}/apply`, {
         signal: AbortSignal.timeout(10000),
@@ -192,8 +200,11 @@ export async function resolveFeedLink(slug: string, link: string): Promise<strin
         redirect: "manual",
         headers: { "user-agent": "Mozilla/5.0 (compatible; job-hunt-collector/1.0)" },
       });
+      if (res.status === 429) { await new Promise((r) => setTimeout(r, 5000 * attempt)); continue; }
       const to = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      return to && /^https?:\/\//i.test(to) && !/arbeitnow\./i.test(to) ? cleanAtsLink(to) : link;
+      const ats = to && /^https?:\/\//i.test(to) && !/arbeitnow\./i.test(to) ? cleanAtsLink(to) : "";
+      // jobId() drops the query, so "careers/job?gh_jid=…" links would all share one id: keep ours then.
+      return ats && !ats.includes("?") ? ats : link;
     } catch {}
   }
   return link;

@@ -10,6 +10,13 @@ describe("cleanAtsLink", () => {
       .toBe("https://join.com/companies/heidisystemscom/16881137-senior-frontend-engineer");
     expect(cleanAtsLink("https://ingestro.recruitee.com/o/senior-frontend-engineer-gn-3?utm_source=arbeitnow.com"))
       .toBe("https://ingestro.recruitee.com/o/senior-frontend-engineer-gn-3");
+    expect(cleanAtsLink("https://jobs.lever.co/pigment/24e3e6d8/apply?lever-source=arbeitnow"))
+      .toBe("https://jobs.lever.co/pigment/24e3e6d8");
+  });
+
+  it("keeps params that identify the job", () => {
+    expect(cleanAtsLink("https://databricks.com/company/careers/open-positions/job?gh_jid=8123456&utm_source=arbeitnow.com"))
+      .toBe("https://databricks.com/company/careers/open-positions/job?gh_jid=8123456");
   });
 });
 
