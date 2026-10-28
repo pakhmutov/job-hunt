@@ -1,4 +1,4 @@
-import { fetchFeed } from "./feeds";
+import { fetchFeed, resolveFeedLink } from "./feeds";
 import { jobId } from "./jobs";
 
 /**
@@ -72,6 +72,10 @@ const REMOTE_LIMITED_RE =
 const OUTSIDE_RE =
   /\b(canada|toronto|vancouver|montreal|ottawa|latam|brazil|são paulo|sao paulo|mexico|argentina|buenos aires|colombia|bogota|chile|santiago|india|bangalore|bengaluru|hyderabad|pune|delhi|gurgaon|gurugram|noida|mumbai|chennai|china|shanghai|beijing|shenzhen|hong kong|taiwan|taipei|korea|seoul|japan|tokyo|singapore|australia|sydney|melbourne|new zealand|auckland|philippines|manila|vietnam|indonesia|jakarta|malaysia|kuala lumpur|thailand|bangkok|israel|tel aviv|uae|dubai|abu dhabi|saudi|riyadh|qatar|doha|turkey|türkiye|istanbul|azerbaijan|baku|armenia|yerevan|tbilisi|kazakhstan|almaty|astana|russia|moscow|ukraine|kyiv|kiev|belarus|minsk|egypt|cairo|nigeria|lagos|kenya|nairobi|south africa|cape town|johannesburg|pakistan|peru|lima|uruguay|montevideo|costa rica|guatemala|ecuador|quito|venezuela|quebec|québec)\b/i;
 const EXCLUDE_ONLY_RE = /\b(us only|usa only|u\.s\. only|canada only|latam only|india only|must reside in the (us|united states)|apac only)\b/i;
+// "Remote (Poland)", "Remote - Germany", "Remote (Canada, Ireland, UK)": remote only for residents of those countries.
+// Without work rights there (and no sponsorship for remote), only a region-wide or Serbian remote is worth a look.
+const COUNTRY_REMOTE_RE = /^\s*remote\b\s*(?:[(\-–:,]\s*|\s+(?=[a-z]))([^)]*)\)?\s*$/i;
+const WIDE_REMOTE_RE = /\b(europe|european|emea|eu|cet|cest|worldwide|anywhere|global|international|serbia|belgrade|balkans)\b/i;
 
 /** Title stage: is it a frontend role at all, and is it above the level I'm after? */
 export function titleStage(p: Pick<Posting, "title">): Stage {
@@ -98,6 +102,8 @@ export function stackConfirmed(stage: Stage, description: string): boolean {
 /** Rough location gate: drops only explicit onsite outside US/UK/IE/EU and remote limited to US/Canada/LatAm/APAC. */
 export function locationPlausible(p: Pick<Posting, "location" | "remote" | "description">): boolean {
   const loc = (p.location ?? "").trim();
+  const countries = loc.match(COUNTRY_REMOTE_RE)?.[1]?.trim();
+  if (countries && !WIDE_REMOTE_RE.test(countries)) return false;
   if (!loc || EUROPE_RE.test(loc)) return true;
   if (p.remote || REMOTE_WORD_RE.test(loc)) {
     if (GLOBAL_RE.test(loc)) return true;
@@ -105,6 +111,17 @@ export function locationPlausible(p: Pick<Posting, "location" | "remote" | "desc
   }
   return US_RE.test(loc) || !OUTSIDE_RE.test(loc);
 }
+
+// Defence roles a Russian citizen can't get cleared for.
+const CLEARANCE_RE = /\b(security clearance|clearance (is )?required|(active|current) (secret|top secret|ts\/sci)|ts\/sci|top secret|itar|u\.?s\.? persons?)\b/i;
+const CLEARED_TITLE_RE = /\bcleared\b/i;
+
+export function needsClearance(p: Pick<Posting, "title" | "description">): boolean {
+  return CLEARED_TITLE_RE.test(p.title) || CLEARANCE_RE.test(p.description);
+}
+
+// Boards that repost other companies' roles under their own name: the real posting turns up elsewhere.
+const REPOSTER_RE = /^\s*jobgether\b/i;
 
 const decode = (t: string) =>
   t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
@@ -397,7 +414,7 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
   const now = Date.now();
   let seen = 0;
   // Funnel, so a run that matches nothing shows which stage ate everything.
-  const funnel = { title_matched: 0, dropped_level: 0, dropped_age: 0, dropped_location: 0, dropped_stack: 0 };
+  const funnel = { title_matched: 0, dropped_level: 0, dropped_age: 0, dropped_location: 0, dropped_stack: 0, dropped_repost: 0, dropped_clearance: 0 };
   const errors: { company: string; error: string }[] = [];
   const reports: CompanyReport[] = [];
   const jobs: CollectedJob[] = [];
@@ -417,9 +434,12 @@ export async function collect(companies: Company[], maxAgeDays: number, opts: Co
         const ts = p.publishedAt ? Date.parse(p.publishedAt) : NaN;
         if (Number.isFinite(ts) && ts < cutoff) { funnel.dropped_age++; continue; }
         if (!p.link) continue;
+        if (REPOSTER_RE.test(p.company || c.name)) { funnel.dropped_repost++; continue; }
         if (!p.description) p.description = await fetchDescription(c, p).catch(() => "");
         if (!locationPlausible(p)) { funnel.dropped_location++; continue; }
         if (!stackConfirmed(stage, p.description)) { funnel.dropped_stack++; continue; }
+        if (needsClearance(p)) { funnel.dropped_clearance++; continue; }
+        if (c.ats === "feed") p.link = await resolveFeedLink(c.slug, p.link);
         jobs.push({
           id: jobId(p.link),
           link: p.link,

@@ -172,6 +172,33 @@ async function hn(): Promise<Posting[]> {
 
 const FETCHERS: Record<Feed, () => Promise<Posting[]>> = { remoteok, himalayas, jobicy, arbeitnow, weworkremotely, hn };
 
+/** An ATS link without tracking params and the "apply" step: the posting page itself. */
+export function cleanAtsLink(url: string): string {
+  return url.replace(/[?#].*$/, "").replace(/\/(application|apply)\/?$/, "");
+}
+
+/**
+ * Arbeitnow takes postings down within hours, but its /apply redirects to the employer's ATS
+ * (Ashby, Recruitee, JOIN, …), which stays up as long as the job does. Other feeds keep their link.
+ */
+export async function resolveFeedLink(slug: string, link: string): Promise<string> {
+  if (slug !== "arbeitnow") return link;
+  // One retry: the first request of a run sometimes times out.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(`${link.replace(/\/$/, "")}/apply`, {
+        signal: AbortSignal.timeout(10000),
+        cache: "no-store",
+        redirect: "manual",
+        headers: { "user-agent": "Mozilla/5.0 (compatible; job-hunt-collector/1.0)" },
+      });
+      const to = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      return to && /^https?:\/\//i.test(to) && !/arbeitnow\./i.test(to) ? cleanAtsLink(to) : link;
+    } catch {}
+  }
+  return link;
+}
+
 export function fetchFeed(slug: string): Promise<Posting[]> {
   const f = FETCHERS[slug as Feed];
   if (!f) throw new Error(`unknown feed: ${slug}`);

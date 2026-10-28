@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { parsePersonio, recruiteePosting } from "./collector";
-import { hnPosting, parseWwr } from "./feeds";
+import { cleanAtsLink, hnPosting, parseWwr } from "./feeds";
+
+describe("cleanAtsLink", () => {
+  it("drops tracking params and the application step", () => {
+    expect(cleanAtsLink("https://jobs.ashbyhq.com/hawk/30efed4f/application?utm_source=arbeitnow.com&ref=arbeitnow.com"))
+      .toBe("https://jobs.ashbyhq.com/hawk/30efed4f");
+    expect(cleanAtsLink("https://join.com/companies/heidisystemscom/16881137-senior-frontend-engineer?pid=a06ced"))
+      .toBe("https://join.com/companies/heidisystemscom/16881137-senior-frontend-engineer");
+    expect(cleanAtsLink("https://ingestro.recruitee.com/o/senior-frontend-engineer-gn-3?utm_source=arbeitnow.com"))
+      .toBe("https://ingestro.recruitee.com/o/senior-frontend-engineer-gn-3");
+  });
+});
 
 describe("parsePersonio", () => {
   it("reads positions, offices and descriptions", () => {
